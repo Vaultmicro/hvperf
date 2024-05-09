@@ -1039,7 +1039,7 @@ static void handle_control(int fd, struct usb_ctrlrequest *setup) {
         status = write(fd, buf, length);
         if (status < 0) {
             if (errno == EIDRM)
-                fprintf(stderr, "GET_INTERFACE timeout\n", strerror());
+                fprintf(stderr, "GET_INTERFACE timeout %s\n", strerror(errno));
             else
                 perror("write GET_INTERFACE data");
         } else if (status != length) {
