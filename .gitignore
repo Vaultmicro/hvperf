@@ -12,3 +12,4 @@ _deps
 .clang-format
 /build
 /.vscode
+/dwc2_module

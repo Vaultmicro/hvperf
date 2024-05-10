@@ -5,7 +5,7 @@
 
 /*
  * this is an example pthreaded USER MODE driver implementing a
- * USB Gadget/Device with simple bulk source/sink functionality.
+ * USB Gadget/Device with simple bulk in/out functionality.
  * you could implement pda sync software this way, or some usb class
  * protocols (printers, test-and-measurement equipment, and so on).
  *
@@ -53,8 +53,8 @@ static int pattern;
  * Instead:  allocate your own, using normal USB-IF procedures.
  */
 #define DRIVER_VENDOR_NUM 0x0525      /* NetChip */
-#define DRIVER_ISO_PRODUCT_NUM 0xa4a3 /* user mode iso sink/src */
-#define DRIVER_PRODUCT_NUM 0xa4a4     /* user mode sink/src */
+#define DRIVER_ISO_PRODUCT_NUM 0xa4a3 /* user mode iso out/src */
+#define DRIVER_PRODUCT_NUM 0xa4a4     /* user mode out/src */
 
 /* NOTE:  these IDs don't imply endpoint numbering; host side drivers
  * should use endpoint descriptors, or perhaps bcdDevice, to configure
@@ -104,8 +104,8 @@ static const struct usb_config_descriptor config = {
     .bMaxPower = (MAX_USB_POWER + 1) / 2,
 };
 
-static struct usb_interface_descriptor source_sink_intf = {
-    .bLength = sizeof source_sink_intf,
+static struct usb_interface_descriptor in_out_intf = {
+    .bLength = sizeof in_out_intf,
     .bDescriptorType = USB_DT_INTERFACE,
 
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
@@ -116,7 +116,7 @@ static struct usb_interface_descriptor source_sink_intf = {
  * well as dual-speed ones (the only kind with high speed support).
  */
 
-static struct usb_endpoint_descriptor fs_source_desc = {
+static struct usb_endpoint_descriptor fs_in_desc = {
     .bLength = USB_DT_ENDPOINT_SIZE,
     .bDescriptorType = USB_DT_ENDPOINT,
 
@@ -127,7 +127,7 @@ static struct usb_endpoint_descriptor fs_source_desc = {
     .wMaxPacketSize = __constant_cpu_to_le16(64),
 };
 
-static struct usb_endpoint_descriptor fs_sink_desc = {
+static struct usb_endpoint_descriptor fs_out_desc = {
     .bLength = USB_DT_ENDPOINT_SIZE,
     .bDescriptorType = USB_DT_ENDPOINT,
 
@@ -149,8 +149,8 @@ static struct usb_endpoint_descriptor fs_status_desc = {
 };
 
 static const struct usb_endpoint_descriptor *fs_eps[3] = {
-    &fs_source_desc,
-    &fs_sink_desc,
+    &fs_in_desc,
+    &fs_out_desc,
     &fs_status_desc,
 };
 
@@ -159,7 +159,7 @@ static const struct usb_endpoint_descriptor *fs_eps[3] = {
  * Of course, not all hardware supports high speed configurations.
  */
 
-static struct usb_endpoint_descriptor hs_source_desc = {
+static struct usb_endpoint_descriptor hs_in_desc = {
     .bLength = USB_DT_ENDPOINT_SIZE,
     .bDescriptorType = USB_DT_ENDPOINT,
 
@@ -167,7 +167,7 @@ static struct usb_endpoint_descriptor hs_source_desc = {
     .wMaxPacketSize = __constant_cpu_to_le16(512),
 };
 
-static struct usb_endpoint_descriptor hs_sink_desc = {
+static struct usb_endpoint_descriptor hs_out_desc = {
     .bLength = USB_DT_ENDPOINT_SIZE,
     .bDescriptorType = USB_DT_ENDPOINT,
 
@@ -186,9 +186,9 @@ static struct usb_endpoint_descriptor hs_status_desc = {
 };
 
 static const struct usb_endpoint_descriptor *hs_eps[] = {
-    &hs_source_desc,
-    &hs_sink_desc,
-    &hs_status_desc,
+    &hs_in_desc,
+    //&hs_out_desc,
+    //&hs_status_desc,
 };
 
 /*-------------------------------------------------------------------------*/
@@ -198,11 +198,11 @@ static char serial[64];
 static struct usb_string stringtab[] = {
     {
         STRINGID_MFGR,
-        "Licensed to Code, LLC",
+        "Licensed to VaultMicro",
     },
     {
         STRINGID_PRODUCT,
-        "My Source/Sink Product",
+        "hvperf",
     },
     {
         STRINGID_SERIAL,
@@ -214,7 +214,7 @@ static struct usb_string stringtab[] = {
     },
     {
         STRINGID_INTERFACE,
-        "Source/Sink",
+        "hvperf",
     },
 };
 
@@ -248,12 +248,12 @@ static int autoconfig() {
         HIGHSPEED = 1;
         device_desc.bcdDevice = __constant_cpu_to_le16(0x0107),
 
-        fs_source_desc.bEndpointAddress = hs_source_desc.bEndpointAddress = USB_DIR_IN | 1;
+        fs_in_desc.bEndpointAddress = hs_in_desc.bEndpointAddress = USB_DIR_IN | 1;
         EP_IN_NAME = "ep1in";
-        fs_sink_desc.bEndpointAddress = hs_sink_desc.bEndpointAddress = USB_DIR_OUT | 1;
+        fs_out_desc.bEndpointAddress = hs_out_desc.bEndpointAddress = USB_DIR_OUT | 1;
         EP_OUT_NAME = "ep1out";
 
-        source_sink_intf.bNumEndpoints = 3;
+        in_out_intf.bNumEndpoints = 3;
         fs_status_desc.bEndpointAddress = hs_status_desc.bEndpointAddress = USB_DIR_IN | 3;
         EP_STATUS_NAME = "ep3";
 
@@ -287,33 +287,26 @@ static int iso_autoconfig() {
     device_desc.idProduct = __constant_cpu_to_le16(DRIVER_ISO_PRODUCT_NUM);
 
     if (stat(DEVNAME = "fe980000.usb", &statb) == 0) {
-        unsigned bInterval, wMaxPacketSize;
+        unsigned bInterval;
+
+        bInterval = interval;
 
         HIGHSPEED = 1;
         device_desc.bcdDevice = __constant_cpu_to_le16(0x0103);
 
-        bInterval = interval;
-        wMaxPacketSize = bufsize;
+        unsigned short wMaxPacketSize = (unsigned short)bufsize;
 
-        fs_source_desc.bEndpointAddress = hs_source_desc.bEndpointAddress = USB_DIR_IN | 1;
-        fs_source_desc.bmAttributes = hs_source_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
-        fs_source_desc.wMaxPacketSize = min(bufsize, 1023);
-        hs_source_desc.wMaxPacketSize = wMaxPacketSize;
-        fs_source_desc.bInterval = interval + 1;
-        hs_source_desc.bInterval = bInterval;
+        fprintf(stderr,"\n\n%04x\n\n", wMaxPacketSize);
+
+        fs_in_desc.bEndpointAddress = hs_in_desc.bEndpointAddress = USB_DIR_IN | 1;
+        fs_in_desc.bmAttributes = hs_in_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
+        fs_in_desc.wMaxPacketSize = min(bufsize, 1023);
+        hs_in_desc.wMaxPacketSize = wMaxPacketSize;
+        fs_in_desc.bInterval = interval + 1;
+        hs_in_desc.bInterval = bInterval;
         EP_IN_NAME = "ep1in";
-
-        fs_sink_desc.bEndpointAddress = hs_sink_desc.bEndpointAddress = USB_DIR_OUT | 1;
-        fs_sink_desc.bmAttributes = hs_sink_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
-        fs_sink_desc.wMaxPacketSize = min(bufsize, 1023);
-        hs_sink_desc.wMaxPacketSize = wMaxPacketSize;
-        fs_sink_desc.bInterval = interval + 1;
-        hs_sink_desc.bInterval = bInterval;
-        EP_OUT_NAME = "ep1out";
-
-        source_sink_intf.bNumEndpoints = 3;
-        fs_status_desc.bEndpointAddress = hs_status_desc.bEndpointAddress = USB_DIR_IN | 11;
-        EP_STATUS_NAME = "ep3";
+        
+        in_out_intf.bNumEndpoints = 1;
 
         /* Atmel AT91 processors, full speed only */
     } else {
@@ -322,10 +315,10 @@ static int iso_autoconfig() {
     }
     if (verbose) {
         fprintf(stderr, "iso fs wMaxPacket %04x bInterval %02x\n",
-                __le16_to_cpu(fs_sink_desc.wMaxPacketSize), fs_sink_desc.bInterval);
+                __le16_to_cpu(fs_in_desc.wMaxPacketSize), fs_in_desc.bInterval);
         if (HIGHSPEED)
             fprintf(stderr, "iso hs wMaxPacket %04x bInterval %02x\n",
-                    __le16_to_cpu(hs_sink_desc.wMaxPacketSize), hs_sink_desc.bInterval);
+                    __le16_to_cpu(hs_in_desc.wMaxPacketSize), hs_in_desc.bInterval);
     }
     return 0;
 }
@@ -336,15 +329,15 @@ static int iso_autoconfig() {
 
 /*-------------------------------------------------------------------------*/
 
-/* full duplex data, with at least three threads: ep0, sink, and source */
+/* full duplex data, with at least three threads: ep0, out, and in */
 
 static pthread_t ep0;
 
-static pthread_t source;
-static int source_fd = -1;
+static pthread_t in;
+static int in_fd = -1;
 
-static pthread_t sink;
-static int sink_fd = -1;
+static pthread_t out;
+static int out_fd = -1;
 
 // FIXME no status i/o yet
 
@@ -411,8 +404,8 @@ static int ep_config(char *name, const char *label, struct usb_endpoint_descript
     return fd;
 }
 
-#define source_open(name) ep_config(name, __FUNCTION__, &fs_source_desc, &hs_source_desc)
-#define sink_open(name) ep_config(name, __FUNCTION__, &fs_sink_desc, &hs_sink_desc)
+#define in_open(name) ep_config(name, __FUNCTION__, &fs_in_desc, &hs_in_desc)
+#define out_open(name) ep_config(name, __FUNCTION__, &fs_out_desc, &hs_out_desc)
 
 static unsigned long fill_in_buf(void *buf, unsigned long nbytes) {
 #ifdef DO_PIPE
@@ -486,17 +479,17 @@ static int empty_out_buf(void *buf, unsigned long nbytes) {
     return len;
 }
 
-static void *simple_source_thread(void *param) {
+static void *simple_in_thread(void *param) {
     char *name = (char *)param;
     int status;
     char buf[USB_BUFSIZE];
 
-    status = source_open(name);
+    status = in_open(name);
     if (status < 0)
         return 0;
-    source_fd = status;
+    in_fd = status;
 
-    pthread_cleanup_push(close_fd, &source_fd);
+    pthread_cleanup_push(close_fd, &in_fd);
     do {
         unsigned long len;
 
@@ -507,7 +500,7 @@ static void *simple_source_thread(void *param) {
 
         len = fill_in_buf(buf, sizeof buf);
         if (len > 0)
-            status = write(source_fd, buf, len);
+            status = write(in_fd, buf, len);
         else
             status = 0;
 
@@ -524,25 +517,25 @@ static void *simple_source_thread(void *param) {
     return 0;
 }
 
-static void *simple_sink_thread(void *param) {
+static void *simple_out_thread(void *param) {
     char *name = (char *)param;
     int status;
     char buf[USB_BUFSIZE];
 
-    status = sink_open(name);
+    status = out_open(name);
     if (status < 0)
         return 0;
-    sink_fd = status;
+    out_fd = status;
 
     /* synchronous reads of endless streams of data */
-    pthread_cleanup_push(close_fd, &sink_fd);
+    pthread_cleanup_push(close_fd, &out_fd);
     do {
         /* original LinuxThreads cancelation didn't work right
          * so test for it explicitly.
          */
         pthread_testcancel();
         errno = 0;
-        status = read(sink_fd, buf, sizeof buf);
+        status = read(out_fd, buf, sizeof buf);
 
         if (status < 0)
             break;
@@ -560,8 +553,8 @@ static void *simple_sink_thread(void *param) {
     return 0;
 }
 
-static void *(*source_thread)(void *);
-static void *(*sink_thread)(void *);
+static void *(*in_thread)(void *);
+static void *(*out_thread)(void *);
 
 #ifdef AIO
 
@@ -648,11 +641,11 @@ static void *aio_in_thread(void *param) {
     struct iocb *queue, *iocb;
     unsigned i;
 
-    status = source_open(name);
+    status = in_open(name);
     if (status < 0)
         return 0;
-    source_fd = status;
-    pthread_cleanup_push(close_fd, &source_fd);
+    in_fd = status;
+    pthread_cleanup_push(close_fd, &in_fd);
 
     /* initialize i/o queue */
     status = io_setup(aio_in, &ctx);
@@ -676,7 +669,7 @@ static void *aio_in_thread(void *param) {
         }
 
         /* host receives the data we're writing */
-        io_prep_pwrite(iocb, source_fd, buf, fill_in_buf(buf, iosize), 0);
+        io_prep_pwrite(iocb, in_fd, buf, fill_in_buf(buf, iosize), 0);
         io_set_callback(iocb, in_complete);
         iocb->key = USB_DIR_IN;
 
@@ -739,11 +732,11 @@ static void *aio_out_thread(void *param) {
     struct iocb *queue, *iocb;
     unsigned i;
 
-    status = sink_open(name);
+    status = out_open(name);
     if (status < 0)
         return 0;
-    sink_fd = status;
-    pthread_cleanup_push(close_fd, &sink_fd);
+    out_fd = status;
+    pthread_cleanup_push(close_fd, &out_fd);
 
     /* initialize i/o queue */
     status = io_setup(aio_out, &ctx);
@@ -767,7 +760,7 @@ static void *aio_out_thread(void *param) {
         }
 
         /* data can be processed in out_complete() */
-        io_prep_pread(iocb, sink_fd, buf, iosize, 0);
+        io_prep_pread(iocb, out_fd, buf, iosize, 0);
         io_set_callback(iocb, out_complete);
         iocb->key = USB_DIR_OUT;
 
@@ -806,13 +799,18 @@ static void start_io() {
     switch (current_speed) {
     case USB_SPEED_FULL:
         if (iso)
-            iosize = __le16_to_cpup(&fs_source_desc.wMaxPacketSize);
+            iosize = __le16_to_cpup(&fs_in_desc.wMaxPacketSize);
         else
             iosize = bufsize;
         break;
     case USB_SPEED_HIGH:
         /* for iso, we updated bufsize earlier */
-        iosize = bufsize;
+        if(hs_in_desc.wMaxPacketSize > 1024){
+            iosize = 3072;
+        } else{
+            iosize = hs_in_desc.wMaxPacketSize;
+        }
+            iosize = 3072;
         break;
     default:
         fprintf(stderr, "bogus link speed %d\n", current_speed);
@@ -832,15 +830,8 @@ static void start_io() {
      * why?  this clearly doesn't ...
      */
 
-    if (pthread_create(&source, 0, source_thread, (void *)EP_IN_NAME) != 0) {
-        perror("can't create source thread");
-        goto cleanup;
-    }
-
-    if (pthread_create(&sink, 0, sink_thread, (void *)EP_OUT_NAME) != 0) {
-        perror("can't create sink thread");
-        pthread_cancel(source);
-        source = ep0;
+    if (pthread_create(&in, 0, in_thread, (void *)EP_IN_NAME) != 0) {
+        perror("can't create in thread");
         goto cleanup;
     }
 
@@ -860,18 +851,18 @@ cleanup:
 }
 
 static void stop_io() {
-    if (!pthread_equal(source, ep0)) {
-        pthread_cancel(source);
-        if (pthread_join(source, 0) != 0)
-            perror("can't join source thread");
-        source = ep0;
+    if (!pthread_equal(in, ep0)) {
+        pthread_cancel(in);
+        if (pthread_join(in, 0) != 0)
+            perror("can't join in thread");
+        in = ep0;
     }
 
-    if (!pthread_equal(sink, ep0)) {
-        pthread_cancel(sink);
-        if (pthread_join(sink, 0) != 0)
-            perror("can't join sink thread");
-        sink = ep0;
+    if (!pthread_equal(out, ep0)) {
+        pthread_cancel(out);
+        if (pthread_join(out, 0) != 0)
+            perror("can't join out thread");
+        out = ep0;
     }
 }
 
@@ -885,10 +876,10 @@ static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep) {
 
     memcpy(cp, &config, config.bLength);
     cp += config.bLength;
-    memcpy(cp, &source_sink_intf, source_sink_intf.bLength);
-    cp += source_sink_intf.bLength;
+    memcpy(cp, &in_out_intf, in_out_intf.bLength);
+    cp += in_out_intf.bLength;
 
-    for (i = 0; i < source_sink_intf.bNumEndpoints; i++) {
+    for (i = 0; i < in_out_intf.bNumEndpoints; i++) {
         memcpy(cp, ep[i], USB_DT_ENDPOINT_SIZE);
         cp += USB_DT_ENDPOINT_SIZE;
     }
@@ -1052,13 +1043,13 @@ static void handle_control(int fd, struct usb_ctrlrequest *setup) {
         fprintf(stderr, "SET INTERFACE\n");
         /* just reset toggle/halt for the interface's endpoints */
         status = 0;
-        if (ioctl(source_fd, GADGETFS_CLEAR_HALT) < 0) {
+        if (ioctl(in_fd, GADGETFS_CLEAR_HALT) < 0) {
             status = errno;
-            perror("reset source fd");
+            perror("reset in fd");
         }
-        if (ioctl(sink_fd, GADGETFS_CLEAR_HALT) < 0) {
+        if (ioctl(out_fd, GADGETFS_CLEAR_HALT) < 0) {
             status = errno;
-            perror("reset sink fd");
+            perror("reset out fd");
         }
         /* FIXME eventually reset the status endpoint too */
         if (status)
@@ -1123,7 +1114,7 @@ static void *ep0_thread(void *param) {
     time_t now, last;
     struct pollfd ep0_poll;
 
-    source = sink = ep0 = pthread_self();
+    in = out = ep0 = pthread_self();
     pthread_cleanup_push(close_fd, param);
 
     /* REVISIT signal handling ... normally one pthread should
@@ -1248,8 +1239,8 @@ int main(int argc, char **argv) {
             serial[i++] = c;
     }
 
-    source_thread = simple_source_thread;
-    sink_thread = simple_sink_thread;
+    in_thread = simple_in_thread;
+    out_thread = simple_out_thread;
 
     while ((c = getopt(argc, argv, "I:a:i:o:p:r:s:v")) != EOF) {
         switch (c) {
@@ -1261,21 +1252,21 @@ int main(int argc, char **argv) {
              * ignored if high bandwidth could kick in
              */
             interval = atoi(optarg);
-            source_thread = aio_in_thread;
-            sink_thread = aio_out_thread;
+            in_thread = aio_in_thread;
+            out_thread = aio_out_thread;
             continue;
         case 'a': /* aio IN/OUT qlen */
             aio_in = aio_out = atoi(optarg);
-            source_thread = aio_in_thread;
-            sink_thread = aio_out_thread;
+            in_thread = aio_in_thread;
+            out_thread = aio_out_thread;
             continue;
         case 'i': /* aio IN qlen */
             aio_in = atoi(optarg);
-            source_thread = aio_in_thread;
+            in_thread = aio_in_thread;
             continue;
         case 'o': /* aio OUT qlen */
             aio_out = atoi(optarg);
-            sink_thread = aio_out_thread;
+            out_thread = aio_out_thread;
             continue;
         case 's': /* iso buffer size */
             /* for iso, "-s 1025" and higher is high bandwidth */
