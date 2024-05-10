@@ -187,8 +187,8 @@ static struct usb_endpoint_descriptor hs_status_desc = {
 
 static const struct usb_endpoint_descriptor *hs_eps[] = {
     &hs_in_desc,
-    &hs_out_desc,
-    &hs_status_desc,
+    //&hs_out_desc,
+    //&hs_status_desc,
 };
 
 /*-------------------------------------------------------------------------*/
@@ -198,7 +198,7 @@ static char serial[64];
 static struct usb_string stringtab[] = {
     {
         STRINGID_MFGR,
-        "Licensed to Code, LLC",
+        "Licensed to VaultMicro",
     },
     {
         STRINGID_PRODUCT,
@@ -294,12 +294,9 @@ static int iso_autoconfig() {
         HIGHSPEED = 1;
         device_desc.bcdDevice = __constant_cpu_to_le16(0x0103);
 
-        unsigned short wMaxPacketSize = bufsize;
+        unsigned short wMaxPacketSize = (unsigned short)bufsize;
 
-        if(wMaxPacketSize > 3072){
-            fprintf(stderr, "mc supposed to be under 2");
-            return -EINVAL;
-        }
+        fprintf(stderr,"\n\n%04x\n\n", wMaxPacketSize);
 
         fs_in_desc.bEndpointAddress = hs_in_desc.bEndpointAddress = USB_DIR_IN | 1;
         fs_in_desc.bmAttributes = hs_in_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
@@ -308,10 +305,8 @@ static int iso_autoconfig() {
         fs_in_desc.bInterval = interval + 1;
         hs_in_desc.bInterval = bInterval;
         EP_IN_NAME = "ep1in";
-
-        in_out_intf.bNumEndpoints = 3;
-        fs_status_desc.bEndpointAddress = hs_status_desc.bEndpointAddress = USB_DIR_IN | 11;
-        EP_STATUS_NAME = "ep3";
+        
+        in_out_intf.bNumEndpoints = 1;
 
         /* Atmel AT91 processors, full speed only */
     } else {
@@ -811,10 +806,11 @@ static void start_io() {
     case USB_SPEED_HIGH:
         /* for iso, we updated bufsize earlier */
         if(hs_in_desc.wMaxPacketSize > 1024){
-            iosize = 1024;
+            iosize = 3072;
         } else{
             iosize = hs_in_desc.wMaxPacketSize;
         }
+            iosize = 3072;
         break;
     default:
         fprintf(stderr, "bogus link speed %d\n", current_speed);
@@ -836,13 +832,6 @@ static void start_io() {
 
     if (pthread_create(&in, 0, in_thread, (void *)EP_IN_NAME) != 0) {
         perror("can't create in thread");
-        goto cleanup;
-    }
-
-    if (pthread_create(&out, 0, out_thread, (void *)EP_OUT_NAME) != 0) {
-        perror("can't create out thread");
-        pthread_cancel(in);
-        in = ep0;
         goto cleanup;
     }
 
