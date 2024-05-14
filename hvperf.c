@@ -18,11 +18,11 @@
  */
 
 /*!*********************************************************************
-*   hvperf.c
-*   Version     : V1.0.1
-*   Author      : usiop-vault
-*
-*********************************************************************!*/
+ *   hvperf.c
+ *   Version     : V1.0.1
+ *   Author      : usiop-vault
+ *
+ *********************************************************************!*/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -119,47 +119,31 @@ static struct usb_interface_descriptor in_out_intf = {
     .iInterface = STRINGID_INTERFACE,
 };
 
-/* Full speed configurations are used for full-speed only devices as
- * well as dual-speed ones (the only kind with high speed support).
- */
-
-static struct usb_endpoint_descriptor fs_in_desc = {
-    .bLength = USB_DT_ENDPOINT_SIZE,
-    .bDescriptorType = USB_DT_ENDPOINT,
-
-    .bmAttributes = USB_ENDPOINT_XFER_BULK,
-    /* NOTE some controllers may need FS bulk max packet size
-     * to be smaller.  it would be a chip-specific option.
-     */
-    .wMaxPacketSize = __constant_cpu_to_le16(64),
+// Alternate Setting 0
+static struct usb_interface_descriptor in_out_intf_alt0 = {
+    .bLength = sizeof in_out_intf_alt0,
+    .bDescriptorType = USB_DT_INTERFACE,
+    .bInterfaceNumber = 0,
+    .bAlternateSetting = 0,
+    .bNumEndpoints = 2,
+    .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
+    .iInterface = STRINGID_INTERFACE,
 };
 
-static struct usb_endpoint_descriptor fs_out_desc = {
-    .bLength = USB_DT_ENDPOINT_SIZE,
-    .bDescriptorType = USB_DT_ENDPOINT,
-
-    .bmAttributes = USB_ENDPOINT_XFER_BULK,
-    .wMaxPacketSize = __constant_cpu_to_le16(64),
+// Alternate Setting 1
+static struct usb_interface_descriptor in_out_intf_alt1 = {
+    .bLength = sizeof in_out_intf_alt1,
+    .bDescriptorType = USB_DT_INTERFACE,
+    .bInterfaceNumber = 0,
+    .bAlternateSetting = 1,
+    .bNumEndpoints = 1,
+    .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
+    .iInterface = STRINGID_INTERFACE,
 };
 
 /* some devices can handle other status packet sizes */
 #define STATUS_MAXPACKET 8
 #define LOG2_STATUS_POLL_MSEC 3
-
-static struct usb_endpoint_descriptor fs_status_desc = {
-    .bLength = USB_DT_ENDPOINT_SIZE,
-    .bDescriptorType = USB_DT_ENDPOINT,
-
-    .bmAttributes = USB_ENDPOINT_XFER_INT,
-    .wMaxPacketSize = __constant_cpu_to_le16(STATUS_MAXPACKET),
-    .bInterval = (1 << LOG2_STATUS_POLL_MSEC),
-};
-
-static const struct usb_endpoint_descriptor *fs_eps[3] = {
-    &fs_in_desc,
-    &fs_out_desc,
-    &fs_status_desc,
-};
 
 /* High speed configurations are used only in addition to a full-speed
  * ones ... since all high speed devices support full speed configs.
@@ -255,13 +239,13 @@ static int autoconfig() {
         HIGHSPEED = 1;
         device_desc.bcdDevice = __constant_cpu_to_le16(0x0107),
 
-        fs_in_desc.bEndpointAddress = hs_in_desc.bEndpointAddress = USB_DIR_IN | 1;
+        hs_in_desc.bEndpointAddress = USB_DIR_IN | 1;
         EP_IN_NAME = "ep1in";
-        fs_out_desc.bEndpointAddress = hs_out_desc.bEndpointAddress = USB_DIR_OUT | 1;
+        hs_out_desc.bEndpointAddress = USB_DIR_OUT | 1;
         EP_OUT_NAME = "ep1out";
 
         in_out_intf.bNumEndpoints = 3;
-        fs_status_desc.bEndpointAddress = hs_status_desc.bEndpointAddress = USB_DIR_IN | 3;
+        hs_status_desc.bEndpointAddress = USB_DIR_IN | 3;
         EP_STATUS_NAME = "ep3";
 
         /* Atmel AT91 processors, full speed only */
@@ -305,11 +289,9 @@ static int iso_autoconfig() {
 
         fprintf(stderr, "\n\n%04x\n\n", wMaxPacketSize);
 
-        fs_in_desc.bEndpointAddress = hs_in_desc.bEndpointAddress = USB_DIR_IN | 1;
-        fs_in_desc.bmAttributes = hs_in_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
-        fs_in_desc.wMaxPacketSize = min(bufsize, 1023);
+        hs_in_desc.bEndpointAddress = USB_DIR_IN | 1;
+        hs_in_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
         hs_in_desc.wMaxPacketSize = wMaxPacketSize;
-        fs_in_desc.bInterval = interval + 1;
         hs_in_desc.bInterval = bInterval;
         EP_IN_NAME = "ep1in";
 
@@ -321,8 +303,6 @@ static int iso_autoconfig() {
         return -ENODEV;
     }
     if (verbose) {
-        fprintf(stderr, "iso fs wMaxPacket %04x bInterval %02x\n",
-                __le16_to_cpu(fs_in_desc.wMaxPacketSize), fs_in_desc.bInterval);
         if (HIGHSPEED)
             fprintf(stderr, "iso hs wMaxPacket %04x bInterval %02x\n",
                     __le16_to_cpu(hs_in_desc.wMaxPacketSize), hs_in_desc.bInterval);
@@ -378,8 +358,7 @@ static void close_fd(void *fd_ptr) {
 /* you should be able to open and configure endpoints
  * whether or not the host is connected
  */
-static int ep_config(char *name, const char *label, struct usb_endpoint_descriptor *fs,
-                     struct usb_endpoint_descriptor *hs) {
+static int ep_config(char *name, const char *label, struct usb_endpoint_descriptor *hs) {
     int fd, status;
     char buf[USB_BUFSIZE];
 
@@ -393,7 +372,6 @@ static int ep_config(char *name, const char *label, struct usb_endpoint_descript
 
     /* one (fs or ls) or two (fs + hs) sets of config descriptors */
     *(__u32 *)buf = 1; /* tag for this format */
-    memcpy(buf + 4, fs, USB_DT_ENDPOINT_SIZE);
     if (HIGHSPEED)
         memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs, USB_DT_ENDPOINT_SIZE);
     status = write(fd, buf, 4 + USB_DT_ENDPOINT_SIZE + (HIGHSPEED ? USB_DT_ENDPOINT_SIZE : 0));
@@ -411,8 +389,8 @@ static int ep_config(char *name, const char *label, struct usb_endpoint_descript
     return fd;
 }
 
-#define in_open(name) ep_config(name, __FUNCTION__, &fs_in_desc, &hs_in_desc)
-#define out_open(name) ep_config(name, __FUNCTION__, &fs_out_desc, &hs_out_desc)
+#define in_open(name) ep_config(name, __FUNCTION__, &hs_in_desc)
+#define out_open(name) ep_config(name, __FUNCTION__, &hs_out_desc)
 
 static unsigned long fill_in_buf(void *buf, unsigned long nbytes) {
 #ifdef DO_PIPE
@@ -806,7 +784,7 @@ static void start_io() {
     switch (current_speed) {
     case USB_SPEED_FULL:
         if (iso)
-            iosize = __le16_to_cpup(&fs_in_desc.wMaxPacketSize);
+            iosize = __le16_to_cpup(&hs_in_desc.wMaxPacketSize);
         else
             iosize = bufsize;
         break;
@@ -920,7 +898,6 @@ static int init_device(void) {
     cp += 4;
 
     /* write full then high speed configs */
-    cp = build_config(cp, fs_eps);
     if (HIGHSPEED)
         cp = build_config(cp, hs_eps);
 
