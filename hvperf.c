@@ -19,7 +19,7 @@
 
 /*!*********************************************************************
 *   hvperf.c
-*   Version     : V1.0.1
+*   Version     : V1.0.2
 *   Author      : usiop-vault
 *
 *********************************************************************!*/
@@ -103,7 +103,8 @@ static struct usb_device_descriptor device_desc = {
 static struct usb_interface_descriptor in_out_intf0 = {
     .bLength = sizeof in_out_intf0,
     .bDescriptorType = USB_DT_INTERFACE,
-
+    .bInterfaceNumber = 0,
+    .bAlternateSetting = 0,
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
     .iInterface = STRINGID_INTERFACE0,
 };
@@ -111,7 +112,8 @@ static struct usb_interface_descriptor in_out_intf0 = {
 static struct usb_interface_descriptor in_out_intf1 = {
     .bLength = sizeof in_out_intf1,
     .bDescriptorType = USB_DT_INTERFACE,
-
+    .bInterfaceNumber = 1,
+    .bAlternateSetting = 0,
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
     .iInterface = STRINGID_INTERFACE1,
 };
@@ -358,16 +360,25 @@ static int iso_autoconfig() {
 
         unsigned short wMaxPacketSize = (unsigned short)bufsize;
 
-        fs_in_desc.bEndpointAddress = hs_in0_desc.bEndpointAddress
-                                    = hs_in1_desc.bEndpointAddress = USB_DIR_IN | 1;
+        fs_in_desc.bEndpointAddress = hs_in0_desc.bEndpointAddress = USB_DIR_IN | 1;
+        hs_in1_desc.bEndpointAddress = USB_DIR_IN | 2;
+        hs_out1_desc.bEndpointAddress = USB_DIR_OUT | 2;
+
+
         fs_in_desc.bmAttributes = hs_in0_desc.bmAttributes
-                                = hs_in1_desc.bmAttributes =USB_ENDPOINT_XFER_ISOC;
+                                = hs_in1_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
+                                
         fs_in_desc.wMaxPacketSize = min(bufsize, 1023);
+
         hs_in0_desc.wMaxPacketSize = 
-            hs_in1_desc.wMaxPacketSize = wMaxPacketSize;
+            hs_in1_desc.wMaxPacketSize = 
+                hs_out0_desc.wMaxPacketSize =
+                    hs_out1_desc.wMaxPacketSize = wMaxPacketSize;
+
         fs_in_desc.bInterval = interval + 1;
+
         hs_in0_desc.bInterval = 
-            hs_in1_desc.bInterval =bInterval;
+            hs_in1_desc.bInterval = bInterval;
         EP_IN0_NAME = "ep1in";
 
 
@@ -943,6 +954,7 @@ static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
 
     memcpy(cp, &config, config.bLength);
     cp += config.bLength;
+
     memcpy(cp, &in_out_intf0, in_out_intf0.bLength);
     cp += in_out_intf0.bLength;
 
@@ -951,13 +963,14 @@ static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
         cp += USB_DT_ENDPOINT_SIZE;
     }
 
-    memcpy(cp, &in_out_intf0, in_out_intf1.bLength);
+    memcpy(cp, &in_out_intf1, in_out_intf1.bLength);
     cp += in_out_intf1.bLength;
 
     for (i = 0; i < in_out_intf1.bNumEndpoints; i++) {
         memcpy(cp, ep2[i], USB_DT_ENDPOINT_SIZE);
         cp += USB_DT_ENDPOINT_SIZE;
     }
+
     c->wTotalLength = __cpu_to_le16(cp - (char *)c);
     return cp;
 }
