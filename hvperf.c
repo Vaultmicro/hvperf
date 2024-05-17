@@ -956,9 +956,36 @@ static int init_device(void) {
     cp += 4;
 
     /* write full then high speed configs */
-    if (HIGHSPEED) {
-        cp = build_config(cp, hs_eps1, hs_eps2);
+    // if (HIGHSPEED) {
+    //     cp = build_config(cp, hs_eps1, hs_eps2);
+    // }
+
+        struct usb_config_descriptor *c;
+    int i;
+
+    c = (struct usb_config_descriptor *)cp;
+
+    memcpy(cp, &config, config.bLength);
+    cp += config.bLength;
+
+    memcpy(cp, &in_out_intf0, in_out_intf0.bLength);
+    cp += in_out_intf0.bLength;
+
+    for (i = 0; i < in_out_intf0.bNumEndpoints; i++) {
+        memcpy(cp, hs_eps1[i], USB_DT_ENDPOINT_SIZE);
+        cp += USB_DT_ENDPOINT_SIZE;
     }
+
+    memcpy(cp, &in_out_intf1, in_out_intf1.bLength);
+    cp += in_out_intf1.bLength;
+
+    for (i = 0; i < in_out_intf1.bNumEndpoints; i++) {
+        memcpy(cp, hs_eps2[i], USB_DT_ENDPOINT_SIZE);
+        cp += USB_DT_ENDPOINT_SIZE;
+    }
+
+    c->wTotalLength = __cpu_to_le16(cp - (char *)c);
+    return cp;
 
     /* and device descriptor at the end */
     memcpy(cp, &device_desc, sizeof device_desc);
