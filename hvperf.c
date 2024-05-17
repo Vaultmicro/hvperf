@@ -18,11 +18,11 @@
  */
 
 /*!*********************************************************************
-*   hvperf.c
-*   Version     : V1.0.2
-*   Author      : usiop-vault
-*
-*********************************************************************!*/
+ *   hvperf.c
+ *   Version     : V1.0.2
+ *   Author      : usiop-vault
+ *
+ *********************************************************************!*/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -103,7 +103,7 @@ static struct usb_device_descriptor device_desc = {
 static struct usb_interface_descriptor in_out_intf0 = {
     .bLength = sizeof in_out_intf0,
     .bDescriptorType = USB_DT_INTERFACE,
-    .bInterfaceNumber = 0,
+    .bInterfaceNumber = 1,
     .bAlternateSetting = 0,
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
     .iInterface = STRINGID_INTERFACE0,
@@ -112,53 +112,15 @@ static struct usb_interface_descriptor in_out_intf0 = {
 static struct usb_interface_descriptor in_out_intf1 = {
     .bLength = sizeof in_out_intf1,
     .bDescriptorType = USB_DT_INTERFACE,
-    .bInterfaceNumber = 1,
+    .bInterfaceNumber = 2,
     .bAlternateSetting = 0,
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
     .iInterface = STRINGID_INTERFACE1,
 };
 
-/* Full speed configurations are used for full-speed only devices as
- * well as dual-speed ones (the only kind with high speed support).
- */
-
-static struct usb_endpoint_descriptor fs_in_desc = {
-    .bLength = USB_DT_ENDPOINT_SIZE,
-    .bDescriptorType = USB_DT_ENDPOINT,
-
-    .bmAttributes = USB_ENDPOINT_XFER_BULK,
-    /* NOTE some controllers may need FS bulk max packet size
-     * to be smaller.  it would be a chip-specific option.
-     */
-    .wMaxPacketSize = __constant_cpu_to_le16(64),
-};
-
-static struct usb_endpoint_descriptor fs_out_desc = {
-    .bLength = USB_DT_ENDPOINT_SIZE,
-    .bDescriptorType = USB_DT_ENDPOINT,
-
-    .bmAttributes = USB_ENDPOINT_XFER_BULK,
-    .wMaxPacketSize = __constant_cpu_to_le16(64),
-};
-
 /* some devices can handle other status packet sizes */
 #define STATUS_MAXPACKET 8
 #define LOG2_STATUS_POLL_MSEC 3
-
-static struct usb_endpoint_descriptor fs_status_desc = {
-    .bLength = USB_DT_ENDPOINT_SIZE,
-    .bDescriptorType = USB_DT_ENDPOINT,
-
-    .bmAttributes = USB_ENDPOINT_XFER_INT,
-    .wMaxPacketSize = __constant_cpu_to_le16(STATUS_MAXPACKET),
-    .bInterval = (1 << LOG2_STATUS_POLL_MSEC),
-};
-
-static const struct usb_endpoint_descriptor *fs_eps[3] = {
-    &fs_in_desc,
-    &fs_out_desc,
-    &fs_status_desc,
-};
 
 /* High speed configurations are used only in addition to a full-speed
  * ones ... since all high speed devices support full speed configs.
@@ -235,7 +197,9 @@ static const struct usb_config_descriptor config = {
 
     /* must compute wTotalLength ... */
     .bNumInterfaces = 2,
-    .wTotalLength = sizeof(config) + sizeof(in_out_intf0) + sizeof(in_out_intf1),
+    .wTotalLength = sizeof(config) + sizeof(in_out_intf0) + sizeof(in_out_intf1) +
+                    sizeof(hs_in0_desc) + sizeof(hs_in1_desc) + sizeof(hs_out0_desc) +
+                    sizeof(hs_out1_desc) + sizeof(hs_status0_desc) + sizeof(hs_status1_desc),
     .bConfigurationValue = CONFIG_VALUE,
     .iConfiguration = STRINGID_CONFIG,
     .bmAttributes = USB_CONFIG_ATT_ONE | USB_CONFIG_ATT_SELFPOWER,
@@ -286,7 +250,8 @@ static struct usb_gadget_strings strings = {
 
 static int HIGHSPEED;
 static char *DEVNAME;
-static char *EP_IN0_NAME, *EP_IN1_NAME, *EP_OUT0_NAME, *EP_OUT1_NAME, *EP_STATUS0_NAME, *EP_STATUS1_NAME;
+static char *EP_IN0_NAME, *EP_IN1_NAME, *EP_OUT0_NAME, *EP_OUT1_NAME, *EP_STATUS0_NAME,
+    *EP_STATUS1_NAME;
 
 /* gadgetfs currently has no chunking (or O_DIRECT/zerocopy) support
  * to turn big requests into lots of smaller ones; so this is "small".
@@ -303,18 +268,17 @@ static int autoconfig() {
         HIGHSPEED = 1;
         device_desc.bcdDevice = __constant_cpu_to_le16(0x0107),
 
-        fs_in_desc.bEndpointAddress = hs_in0_desc.bEndpointAddress
-                                    = hs_in1_desc.bEndpointAddress = USB_DIR_IN | 1;
+        hs_in0_desc.bEndpointAddress = hs_in1_desc.bEndpointAddress = USB_DIR_IN | 1;
         EP_IN0_NAME = "ep1in";
         EP_IN1_NAME = "ep2in";
 
-        fs_out_desc.bEndpointAddress = hs_out0_desc.bEndpointAddress
-                                     = hs_out1_desc.bEndpointAddress = USB_DIR_OUT | 1;
+        hs_out0_desc.bEndpointAddress = hs_out1_desc.bEndpointAddress = USB_DIR_OUT | 1;
+
         EP_OUT0_NAME = "ep1out";
         EP_OUT1_NAME = "ep2out";
 
-        fs_status_desc.bEndpointAddress = hs_status0_desc.bEndpointAddress = 
-                                          hs_status1_desc.bEndpointAddress =  USB_DIR_IN | 3;
+        hs_status0_desc.bEndpointAddress = hs_status1_desc.bEndpointAddress = USB_DIR_IN | 3;
+
         EP_STATUS0_NAME = "ep3";
         EP_STATUS1_NAME = "ep4";
 
@@ -360,27 +324,33 @@ static int iso_autoconfig() {
 
         unsigned short wMaxPacketSize = (unsigned short)bufsize;
 
-        fs_in_desc.bEndpointAddress = hs_in0_desc.bEndpointAddress = USB_DIR_IN | 1;
+        hs_in0_desc.bEndpointAddress = USB_DIR_IN | 1;
         hs_in1_desc.bEndpointAddress = USB_DIR_IN | 2;
         hs_out1_desc.bEndpointAddress = USB_DIR_OUT | 2;
 
-
-        fs_in_desc.bmAttributes = hs_in0_desc.bmAttributes
-                                = hs_in1_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
-                                
-        fs_in_desc.wMaxPacketSize = min(bufsize, 1023);
-
-        hs_in0_desc.wMaxPacketSize = 
-            hs_in1_desc.wMaxPacketSize = 
-                hs_out0_desc.wMaxPacketSize =
-                    hs_out1_desc.wMaxPacketSize = wMaxPacketSize;
-
-        fs_in_desc.bInterval = interval + 1;
-
-        hs_in0_desc.bInterval = 
-            hs_in1_desc.bInterval = bInterval;
+        hs_in0_desc.bEndpointAddress = hs_in1_desc.bEndpointAddress = USB_DIR_IN | 1;
         EP_IN0_NAME = "ep1in";
+        EP_IN1_NAME = "ep2in";
 
+        hs_out0_desc.bEndpointAddress = hs_out1_desc.bEndpointAddress = USB_DIR_OUT | 1;
+
+        EP_OUT0_NAME = "ep1out";
+        EP_OUT1_NAME = "ep2out";
+
+        hs_status0_desc.bEndpointAddress = hs_status1_desc.bEndpointAddress = USB_DIR_IN | 3;
+
+        EP_STATUS0_NAME = "ep3";
+        EP_STATUS1_NAME = "ep4";
+
+        hs_in1_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
+        hs_out1_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
+
+        hs_in1_desc.wMaxPacketSize = hs_out1_desc.wMaxPacketSize = wMaxPacketSize;
+
+        hs_in0_desc.bInterval = hs_in1_desc.bInterval = bInterval;
+
+        in_out_intf0.bNumEndpoints = 3;
+        in_out_intf1.bNumEndpoints = 3;
 
         /* Atmel AT91 processors, full speed only */
     } else {
@@ -388,8 +358,6 @@ static int iso_autoconfig() {
         return -ENODEV;
     }
     if (verbose) {
-        fprintf(stderr, "iso fs wMaxPacket %04x bInterval %02x\n",
-                __le16_to_cpu(fs_in_desc.wMaxPacketSize), fs_in_desc.bInterval);
         if (HIGHSPEED)
             fprintf(stderr, "iso hs wMaxPacket %04x bInterval %02x\n",
                     __le16_to_cpu(hs_in0_desc.wMaxPacketSize), hs_in0_desc.bInterval);
@@ -445,8 +413,7 @@ static void close_fd(void *fd_ptr) {
 /* you should be able to open and configure endpoints
  * whether or not the host is connected
  */
-static int ep_config(char *name, const char *label, struct usb_endpoint_descriptor *fs,
-                     struct usb_endpoint_descriptor *hs1,
+static int ep_config(char *name, const char *label, struct usb_endpoint_descriptor *hs1,
                      struct usb_endpoint_descriptor *hs2) {
     int fd, status;
     char buf[USB_BUFSIZE];
@@ -461,8 +428,7 @@ static int ep_config(char *name, const char *label, struct usb_endpoint_descript
 
     /* one (fs or ls) or two (fs + hs) sets of config descriptors */
     *(__u32 *)buf = 1; /* tag for this format */
-    memcpy(buf + 4, fs, USB_DT_ENDPOINT_SIZE);
-    if (HIGHSPEED){
+    if (HIGHSPEED) {
         memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs1, USB_DT_ENDPOINT_SIZE);
         memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs2, USB_DT_ENDPOINT_SIZE);
     }
@@ -481,8 +447,8 @@ static int ep_config(char *name, const char *label, struct usb_endpoint_descript
     return fd;
 }
 
-#define in_open(name) ep_config(name, __FUNCTION__, &fs_in_desc, &hs_in0_desc, &hs_in1_desc)
-#define out_open(name) ep_config(name, __FUNCTION__, &fs_out_desc, &hs_out0_desc, &hs_out1_desc)
+#define in_open(name) ep_config(name, __FUNCTION__, &hs_in0_desc, &hs_in1_desc)
+#define out_open(name) ep_config(name, __FUNCTION__, &hs_out0_desc, &hs_out1_desc)
 
 static unsigned long fill_in_buf(void *buf, unsigned long nbytes) {
 #ifdef DO_PIPE
@@ -874,12 +840,6 @@ static void start_io() {
      * polls that queue once per interval.
      */
     switch (current_speed) {
-    case USB_SPEED_FULL:
-        if (iso)
-            iosize = __le16_to_cpup(&fs_in_desc.wMaxPacketSize);
-        else
-            iosize = bufsize;
-        break;
     case USB_SPEED_HIGH:
         /* for iso, we updated bufsize earlier */
         if (hs_in0_desc.wMaxPacketSize > 1024) {
@@ -946,7 +906,7 @@ static void stop_io() {
 /*-------------------------------------------------------------------------*/
 
 static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
-                            const struct usb_endpoint_descriptor **ep2) {
+                          const struct usb_endpoint_descriptor **ep2) {
     struct usb_config_descriptor *c;
     int i;
 
@@ -980,12 +940,7 @@ static int init_device(void) {
     int fd;
     int status;
 
-#ifdef AIO
-    if (iso)
-        status = iso_autoconfig();
-    else
-#endif
-        status = autoconfig();
+    status = iso_autoconfig();
     if (status < 0) {
         fprintf(stderr, "?? don't recognize /dev/gadget %s device\n", iso ? "iso" : "bulk");
         return status;
@@ -1001,7 +956,7 @@ static int init_device(void) {
     cp += 4;
 
     /* write full then high speed configs */
-    if (HIGHSPEED){
+    if (HIGHSPEED) {
         cp = build_config(cp, hs_eps1, hs_eps2);
     }
 
