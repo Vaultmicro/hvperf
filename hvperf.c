@@ -99,6 +99,23 @@ static struct usb_device_descriptor device_desc = {
 #define MAX_USB_POWER 1
 
 #define CONFIG_VALUE 3
+static struct usb_interface_descriptor in_out_fs_intf = {
+    .bLength = sizeof in_out_fs_intf,
+    .bDescriptorType = USB_DT_INTERFACE,
+    .bInterfaceNumber = 3,
+    .bAlternateSetting = 0,
+    .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
+    .iInterface = STRINGID_INTERFACE0,
+    .bNumEndpoints = 1,
+};
+
+static struct usb_endpoint_descriptor fs_in_desc = {
+    .bLength = USB_DT_ENDPOINT_SIZE,
+    .bDescriptorType = USB_DT_ENDPOINT,
+
+    .bmAttributes = USB_ENDPOINT_XFER_BULK,
+    .wMaxPacketSize = __constant_cpu_to_le16(512),
+};
 
 static struct usb_interface_descriptor in_out_intf0 = {
     .bLength = sizeof in_out_intf0,
@@ -811,7 +828,6 @@ static void start_io() {
         } else {
             iosize = hs_in0_desc.wMaxPacketSize;
         }
-        iosize = 3072;
         break;
     default:
         fprintf(stderr, "bogus link speed %d\n", current_speed);
@@ -868,6 +884,26 @@ static void stop_io() {
 }
 
 /*-------------------------------------------------------------------------*/
+static char *build_fs_config(char *cp) {
+    struct usb_config_descriptor *c;
+    int i;
+
+    c = (struct usb_config_descriptor *)cp;
+
+    memcpy(cp, &config, sizeof config);
+    cp += sizeof config;
+
+    fprintf(stderr,"bDescriptorType : 0x%X\n",config.bDescriptorType);
+
+    memcpy(cp, &in_out_fs_intf, sizeof in_out_fs_intf);
+    cp += in_out_fs_intf.bLength;
+
+    memcpy(cp, &fs_in_desc, USB_DT_ENDPOINT_SIZE);
+    cp += USB_DT_ENDPOINT_SIZE;
+
+    c->wTotalLength = __cpu_to_le16(cp - (char *)c);
+    return cp;
+}
 
 static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
                            const struct usb_endpoint_descriptor **ep2) {
@@ -876,10 +912,12 @@ static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
 
     c = (struct usb_config_descriptor *)cp;
 
-    memcpy(cp, &config, config.bLength);
-    cp += config.bLength;
+    memcpy(cp, &config, sizeof config);
+    cp += sizeof config;
 
-    memcpy(cp, &in_out_intf0, in_out_intf0.bLength);
+    fprintf(stderr,"bDescriptorType : 0x%X\n",config.bDescriptorType);
+
+    memcpy(cp, &in_out_intf0, sizeof in_out_intf0);
     cp += in_out_intf0.bLength;
 
     for (i = 0; i < in_out_intf0.bNumEndpoints; i++) {
@@ -887,7 +925,7 @@ static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
         cp += USB_DT_ENDPOINT_SIZE;
     }
 
-    memcpy(cp, &in_out_intf1, in_out_intf1.bLength);
+    memcpy(cp, &in_out_intf1, sizeof in_out_intf1);
     cp += in_out_intf1.bLength;
     
     for (i = 0; i < in_out_intf1.bNumEndpoints; i++) {
@@ -919,7 +957,7 @@ static int init_device(void) {
     *(__u32 *)cp = 0; /* tag for this format */
     cp += 4;
 
-    cp = build_config(cp, hs_eps1, hs_eps2);
+    cp = build_fs_config(cp);
     cp = build_config(cp, hs_eps1, hs_eps2);
 
     /* and device descriptor at the end */
