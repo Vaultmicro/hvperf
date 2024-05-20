@@ -250,8 +250,8 @@ static struct usb_gadget_strings strings = {
 
 static int HIGHSPEED;
 static char *DEVNAME;
-static char *EP_IN0_NAME, *EP_IN1_NAME, *EP_OUT0_NAME, *EP_OUT1_NAME,
-    *EP_STATUS0_NAME, *EP_STATUS1_NAME;
+static char *EP_IN0_NAME, *EP_IN1_NAME, *EP_OUT0_NAME, *EP_OUT1_NAME, *EP_STATUS0_NAME,
+    *EP_STATUS1_NAME;
 
 /* gadgetfs currently has no chunking (or O_DIRECT/zerocopy) support
  * to turn big requests into lots of smaller ones; so this is "small".
@@ -270,7 +270,7 @@ static unsigned bufsize = USB_BUFSIZE;
 /* This is almost the only place where usb needs to know whether we're
  * driving an isochronous stream or a bulk one.
  */
-static int iso_autoconfig() {
+static int autoconfig() {
     struct stat statb;
 
     /* ISO endpoints "must not be part of a default interface setting".
@@ -296,7 +296,7 @@ static int iso_autoconfig() {
         hs_out0_desc.bEndpointAddress = USB_DIR_OUT | 1;
         hs_out1_desc.bEndpointAddress = USB_DIR_OUT | 2;
         hs_status0_desc.bEndpointAddress = USB_DIR_IN | 3;
-        hs_status1_desc.bEndpointAddress = USB_DIR_IN | 3;
+        hs_status1_desc.bEndpointAddress = USB_DIR_IN | 4;
 
         EP_IN0_NAME = "ep1in";
         EP_IN1_NAME = "ep2in";
@@ -306,6 +306,9 @@ static int iso_autoconfig() {
 
         EP_STATUS0_NAME = "ep3";
         EP_STATUS1_NAME = "ep4";
+
+        hs_in0_desc.bmAttributes = USB_ENDPOINT_XFER_BULK;
+        hs_out0_desc.bmAttributes = USB_ENDPOINT_XFER_BULK;
 
         hs_in1_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
         hs_out1_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
@@ -866,7 +869,8 @@ static void stop_io() {
 
 /*-------------------------------------------------------------------------*/
 
-static char *build_config1(char *cp, const struct usb_endpoint_descriptor **ep) {
+static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
+                           const struct usb_endpoint_descriptor **ep2) {
     struct usb_config_descriptor *c;
     int i;
 
@@ -879,29 +883,15 @@ static char *build_config1(char *cp, const struct usb_endpoint_descriptor **ep) 
     cp += in_out_intf0.bLength;
 
     for (i = 0; i < in_out_intf0.bNumEndpoints; i++) {
-        memcpy(cp, ep[i], USB_DT_ENDPOINT_SIZE);
+        memcpy(cp, ep1[i], USB_DT_ENDPOINT_SIZE);
         cp += USB_DT_ENDPOINT_SIZE;
     }
 
-
-    c->wTotalLength = __cpu_to_le16(cp - (char *)c);
-    return cp;
-}
-
-static char *build_config2(char *cp, const struct usb_endpoint_descriptor **ep) {
-    struct usb_config_descriptor *c;
-    int i;
-
-    c = (struct usb_config_descriptor *)cp;
-
-    memcpy(cp, &config, config.bLength);
-    cp += config.bLength;
-
     memcpy(cp, &in_out_intf1, in_out_intf1.bLength);
     cp += in_out_intf1.bLength;
-
+    
     for (i = 0; i < in_out_intf1.bNumEndpoints; i++) {
-        memcpy(cp, ep[i], USB_DT_ENDPOINT_SIZE);
+        memcpy(cp, ep2[i], USB_DT_ENDPOINT_SIZE);
         cp += USB_DT_ENDPOINT_SIZE;
     }
 
@@ -914,7 +904,7 @@ static int init_device(void) {
     int fd;
     int status;
 
-    status = iso_autoconfig();
+    status = autoconfig();
     if (status < 0) {
         fprintf(stderr, "?? don't recognize /dev/gadget %s device\n", iso ? "iso" : "bulk");
         return status;
@@ -929,14 +919,14 @@ static int init_device(void) {
     *(__u32 *)cp = 0; /* tag for this format */
     cp += 4;
 
-    if (HIGHSPEED) {
-        cp = build_config1(cp, hs_eps1);
-        cp = build_config2(cp, hs_eps2);
-    }
+    cp = build_config(cp, hs_eps1, hs_eps2);
+    cp = build_config(cp, hs_eps1, hs_eps2);
 
     /* and device descriptor at the end */
     memcpy(cp, &device_desc, sizeof device_desc);
     cp += sizeof device_desc;
+
+    fprintf(stderr, "Buffer size: %ld\n", cp - buf);
 
     status = write(fd, &buf[0], cp - &buf[0]);
     if (status < 0) {
