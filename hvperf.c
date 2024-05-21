@@ -99,23 +99,6 @@ static struct usb_device_descriptor device_desc = {
 #define MAX_USB_POWER 1
 
 #define CONFIG_VALUE 3
-static struct usb_interface_descriptor in_out_fs_intf = {
-    .bLength = sizeof in_out_fs_intf,
-    .bDescriptorType = USB_DT_INTERFACE,
-    .bInterfaceNumber = 3,
-    .bAlternateSetting = 0,
-    .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
-    .iInterface = STRINGID_INTERFACE0,
-    .bNumEndpoints = 1,
-};
-
-static struct usb_endpoint_descriptor fs_in_desc = {
-    .bLength = USB_DT_ENDPOINT_SIZE,
-    .bDescriptorType = USB_DT_ENDPOINT,
-
-    .bmAttributes = USB_ENDPOINT_XFER_BULK,
-    .wMaxPacketSize = __constant_cpu_to_le16(512),
-};
 
 static struct usb_interface_descriptor in_out_intf0 = {
     .bLength = sizeof in_out_intf0,
@@ -957,7 +940,7 @@ static int init_device(void) {
     *(__u32 *)cp = 0; /* tag for this format */
     cp += 4;
 
-    cp = build_fs_config(cp);
+    cp = build_config(cp, hs_eps1, hs_eps2);
     cp = build_config(cp, hs_eps1, hs_eps2);
 
     /* and device descriptor at the end */
