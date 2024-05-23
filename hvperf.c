@@ -180,6 +180,16 @@ static const struct usb_endpoint_descriptor *hs_eps[] = {
     &hs_in2_desc,
 };
 
+static const struct usb_endpoint_descriptor *hs_in_eps[] = {
+    &hs_in0_desc,
+    &hs_in1_desc,
+    &hs_in2_desc,
+};
+
+static const struct usb_endpoint_descriptor *hs_out_eps[] = {
+    &hs_out0_desc,
+};
+
 static const struct usb_interface_descriptor *hs_intfs[] = {
     &in_out_intf0,
     &in_out_intf1_alt0,
@@ -191,7 +201,7 @@ static const struct usb_config_descriptor config = {
     .bDescriptorType = USB_DT_CONFIG,
 
     /* must compute wTotalLength ... */
-    .bNumInterfaces = 2,
+    .bNumInterfaces = 3,
     .wTotalLength = sizeof(config) + sizeof(in_out_intf0) + sizeof(in_out_intf1_alt0) +
                     sizeof(in_out_intf1_alt1) + sizeof(hs_in0_desc) + sizeof(hs_out0_desc) +
                     sizeof(hs_in1_desc) + sizeof(hs_in2_desc),
@@ -374,7 +384,9 @@ static void close_fd(void *fd_ptr) {
  */
 static int ep_config(char *name, const char *label, const struct usb_endpoint_descriptor **hs) {
     int fd, status;
-    char buf[USB_BUFSIZE];
+    char buf[USB_BUFSIZE], *cp = &buf[0];
+
+
 
     /* open and initialize with endpoint descriptor(s) */
     fd = open(name, O_RDWR);
@@ -383,21 +395,22 @@ static int ep_config(char *name, const char *label, const struct usb_endpoint_de
         fprintf(stderr, "%s open %s error %d (%s)\n", label, name, errno, strerror(errno));
         return status;
     }
-
     /* one (fs or ls) or two (fs + hs) sets of config descriptors */
-    __u32 tag = 1; // Tag for this format
-    memcpy(buf, &tag, sizeof(tag));
-    memcpy(buf + sizeof(tag), hs, USB_DT_ENDPOINT_SIZE);
+    *(__u32 *)cp = 1; /* tag for this format */
+    cp += 4;
+
+    memcpy(cp, hs[0], USB_DT_ENDPOINT_SIZE);
+    cp += USB_DT_ENDPOINT_SIZE;
 
     int i;
-    int num_endopoints = sizeof(hs_eps) / sizeof(hs_eps[0]);
+    int num_endpoints = sizeof(hs_eps) / sizeof(hs_eps[0]);
 
-    for (i = 0; i < num_endopoints; i++) {
-        memcpy(buf + sizeof(tag) + USB_DT_ENDPOINT_SIZE*(i+1), hs[i], USB_DT_ENDPOINT_SIZE);
+    for (i = 0; i < num_endpoints; i++) {
+        memcpy(cp, hs[i], USB_DT_ENDPOINT_SIZE);
+        cp += USB_DT_ENDPOINT_SIZE;
     }
 
-    size_t write_size = sizeof(tag) + USB_DT_ENDPOINT_SIZE + (HIGHSPEED ? USB_DT_ENDPOINT_SIZE * num_endopoints : 0);
-    status = write(fd, buf, write_size);
+    status = write(fd, buf, cp - buf);
     if (status < 0) {
         status = -errno;
         fprintf(stderr, "%s config %s error %d (%s)\n", label, name, errno, strerror(errno));
@@ -905,15 +918,16 @@ static void stop_io() {
 static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep) {
     struct usb_config_descriptor *c;
     int i, j = 0, k;
+    int num_intf = sizeof(hs_intfs) / sizeof(hs_intfs[0]);
 
     c = (struct usb_config_descriptor *)cp;
 
     memcpy(cp, &config, sizeof config);
     cp += sizeof config;
 
-    for (i = 0; i < sizeof(hs_intfs) / sizeof(in_out_intf0); i++) {
+    for (i = 0; i < num_intf; i++) {
         memcpy(cp, hs_intfs[i], hs_intfs[i]->bLength);
-        cp += in_out_intf0.bLength;
+        cp += hs_intfs[i]->bLength;
 
         for (k = 0; k < hs_intfs[i]->bNumEndpoints; k++, j++) {
             memcpy(cp, ep[j], USB_DT_ENDPOINT_SIZE);
