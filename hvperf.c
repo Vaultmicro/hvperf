@@ -78,6 +78,7 @@ static int pattern;
 #define STRINGID_CONFIG 4
 #define STRINGID_INTERFACE0 5
 #define STRINGID_INTERFACE1 6
+#define STRINGID_INTERFACE2 7
 
 static struct usb_device_descriptor device_desc = {
     .bLength = sizeof device_desc,
@@ -109,11 +110,20 @@ static struct usb_interface_descriptor in_out_intf0 = {
     .iInterface = STRINGID_INTERFACE0,
 };
 
-static struct usb_interface_descriptor in_out_intf1 = {
-    .bLength = sizeof in_out_intf1,
+static struct usb_interface_descriptor in_out_intf1_altf0 = {
+    .bLength = sizeof in_out_intf1_altf0,
     .bDescriptorType = USB_DT_INTERFACE,
     .bInterfaceNumber = 1,
     .bAlternateSetting = 0,
+    .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
+    .iInterface = STRINGID_INTERFACE1,
+};
+
+static struct usb_interface_descriptor in_out_intf1_altf1 = {
+    .bLength = sizeof in_out_intf1_altf1,
+    .bDescriptorType = USB_DT_INTERFACE,
+    .bInterfaceNumber = 1,
+    .bAlternateSetting = 1,
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
     .iInterface = STRINGID_INTERFACE1,
 };
@@ -152,13 +162,25 @@ static struct usb_endpoint_descriptor hs_in1_desc = {
     .wMaxPacketSize = __constant_cpu_to_le16(512),
 };
 
-static const struct usb_endpoint_descriptor *hs_eps1[] = {
-    &hs_in0_desc,
-    &hs_out0_desc,
+static struct usb_endpoint_descriptor hs_in2_desc = {
+    .bLength = USB_DT_ENDPOINT_SIZE,
+    .bDescriptorType = USB_DT_ENDPOINT,
+
+    .bmAttributes = USB_ENDPOINT_XFER_ISOC,
+    .wMaxPacketSize = __constant_cpu_to_le16(512),
 };
 
-static const struct usb_endpoint_descriptor *hs_eps2[] = {
+static const struct usb_endpoint_descriptor *hs_eps[] = {
+    &hs_in0_desc,
+    &hs_out0_desc,
     &hs_in1_desc,
+    &hs_in2_desc,
+};
+
+static const struct usb_interface_descriptor *hs_intfs[] = {
+    &in_out_intf0,
+    &in_out_intf1_altf0,
+    &in_out_intf1_altf1,
 };
 
 static const struct usb_config_descriptor config = {
@@ -167,8 +189,9 @@ static const struct usb_config_descriptor config = {
 
     /* must compute wTotalLength ... */
     .bNumInterfaces = 2,
-    .wTotalLength = sizeof(config) + sizeof(in_out_intf0) + sizeof(in_out_intf1) +
-                    sizeof(hs_in0_desc) + sizeof(hs_out0_desc) + sizeof(hs_in1_desc),
+    .wTotalLength = sizeof(config) + sizeof(in_out_intf0) + sizeof(in_out_intf1_altf0) +
+                    sizeof(in_out_intf1_altf1) + sizeof(hs_in0_desc) + sizeof(hs_out0_desc) +
+                    sizeof(hs_in1_desc) + sizeof(hs_in2_desc),
     .bConfigurationValue = CONFIG_VALUE,
     .iConfiguration = STRINGID_CONFIG,
     .bmAttributes = USB_CONFIG_ATT_ONE | USB_CONFIG_ATT_SELFPOWER,
@@ -204,6 +227,10 @@ static struct usb_string stringtab[] = {
         STRINGID_INTERFACE1,
         "intf1",
     },
+    {
+        STRINGID_INTERFACE2,
+        "intf2",
+    },
 };
 
 static struct usb_gadget_strings strings = {
@@ -219,7 +246,7 @@ static struct usb_gadget_strings strings = {
 
 static int HIGHSPEED;
 static char *DEVNAME;
-static char *EP_IN0_NAME, *EP_IN1_NAME, *EP_OUT0_NAME;
+static char *EP_IN0_NAME, *EP_IN1_NAME, *EP_IN2_NAME, *EP_OUT0_NAME;
 
 /* gadgetfs currently has no chunking (or O_DIRECT/zerocopy) support
  * to turn big requests into lots of smaller ones; so this is "small".
@@ -261,10 +288,12 @@ static int autoconfig() {
 
         hs_in0_desc.bEndpointAddress = USB_DIR_IN | 1;
         hs_in1_desc.bEndpointAddress = USB_DIR_IN | 2;
+        hs_in2_desc.bEndpointAddress = USB_DIR_IN | 3;
         hs_out0_desc.bEndpointAddress = USB_DIR_OUT | 1;
 
         EP_IN0_NAME = "ep1in";
         EP_IN1_NAME = "ep2in";
+        EP_IN2_NAME = "ep3in";
 
         EP_OUT0_NAME = "ep1out";
 
@@ -272,13 +301,16 @@ static int autoconfig() {
         hs_out0_desc.bmAttributes = USB_ENDPOINT_XFER_BULK;
 
         hs_in1_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
+        hs_in2_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
 
         hs_in1_desc.wMaxPacketSize = wMaxPacketSize;
+        hs_in2_desc.wMaxPacketSize = wMaxPacketSize;
 
-        hs_in0_desc.bInterval = hs_in1_desc.bInterval = bInterval;
+        hs_in0_desc.bInterval = hs_in1_desc.bInterval = hs_in2_desc.bInterval = bInterval;
 
         in_out_intf0.bNumEndpoints = 2;
-        in_out_intf1.bNumEndpoints = 1;
+        in_out_intf1_altf0.bNumEndpoints = 1;
+        in_out_intf1_altf1.bNumEndpoints = 1;
 
         /* Atmel AT91 processors, full speed only */
     } else {
@@ -337,8 +369,7 @@ static void close_fd(void *fd_ptr) {
 /* you should be able to open and configure endpoints
  * whether or not the host is connected
  */
-static int ep_config(char *name, const char *label, struct usb_endpoint_descriptor *hs1,
-                     struct usb_endpoint_descriptor *hs2) {
+static int ep_config(char *name, const char *label, const struct usb_endpoint_descriptor **hs) {
     int fd, status;
     char buf[USB_BUFSIZE];
 
@@ -352,9 +383,41 @@ static int ep_config(char *name, const char *label, struct usb_endpoint_descript
 
     /* one (fs or ls) or two (fs + hs) sets of config descriptors */
     *(__u32 *)buf = 1; /* tag for this format */
+    memcpy(buf + 4, hs, USB_DT_ENDPOINT_SIZE);
+    memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs, sizeof(hs));
+
+    status = write(fd, buf, 4 + USB_DT_ENDPOINT_SIZE + (HIGHSPEED ? USB_DT_ENDPOINT_SIZE : 0));
+    if (status < 0) {
+        status = -errno;
+        fprintf(stderr, "%s config %s error %d (%s)\n", label, name, errno, strerror(errno));
+        close(fd);
+        return status;
+    } else if (verbose) {
+        unsigned long id;
+
+        id = pthread_self();
+        fprintf(stderr, "%s start %ld fd %d\n", label, id, fd);
+    }
+    return fd;
+}
+
+static int ep_out_config(char *name, const char *label, struct usb_endpoint_descriptor *hs) {
+    int fd, status;
+    char buf[USB_BUFSIZE];
+
+    /* open and initialize with endpoint descriptor(s) */
+    fd = open(name, O_RDWR);
+    if (fd < 0) {
+        status = -errno;
+        fprintf(stderr, "%s open %s error %d (%s)\n", label, name, errno, strerror(errno));
+        return status;
+    }
+
+    /* one (fs or ls) or two (fs + hs) sets of config descriptors */
+    *(__u32 *)buf = 1; /* tag for this format */
+    memcpy(buf + 4, hs, USB_DT_ENDPOINT_SIZE);
     if (HIGHSPEED) {
-        memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs1, USB_DT_ENDPOINT_SIZE);
-        memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs2, USB_DT_ENDPOINT_SIZE);
+        memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs, sizeof hs);
     }
     status = write(fd, buf, 4 + USB_DT_ENDPOINT_SIZE + (HIGHSPEED ? USB_DT_ENDPOINT_SIZE : 0));
     if (status < 0) {
@@ -371,40 +434,7 @@ static int ep_config(char *name, const char *label, struct usb_endpoint_descript
     return fd;
 }
 
-static int ep_out_config(char *name, const char *label, struct usb_endpoint_descriptor *hs1) {
-    int fd, status;
-    char buf[USB_BUFSIZE];
-
-    /* open and initialize with endpoint descriptor(s) */
-    fd = open(name, O_RDWR);
-    if (fd < 0) {
-        status = -errno;
-        fprintf(stderr, "%s open %s error %d (%s)\n", label, name, errno, strerror(errno));
-        return status;
-    }
-
-    /* one (fs or ls) or two (fs + hs) sets of config descriptors */
-    *(__u32 *)buf = 1; /* tag for this format */
-    memcpy(buf + 4, hs1, USB_DT_ENDPOINT_SIZE);
-    if (HIGHSPEED) {
-        memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs1, USB_DT_ENDPOINT_SIZE);
-    }
-    status = write(fd, buf, 4 + USB_DT_ENDPOINT_SIZE + (HIGHSPEED ? USB_DT_ENDPOINT_SIZE : 0));
-    if (status < 0) {
-        status = -errno;
-        fprintf(stderr, "%s config %s error %d (%s)\n", label, name, errno, strerror(errno));
-        close(fd);
-        return status;
-    } else if (verbose) {
-        unsigned long id;
-
-        id = pthread_self();
-        fprintf(stderr, "%s start %ld fd %d\n", label, id, fd);
-    }
-    return fd;
-}
-
-#define in_open(name) ep_config(name, __FUNCTION__, &hs_in0_desc, &hs_in1_desc)
+#define in_open(name) ep_config(name, __FUNCTION__, hs_eps)
 #define out_open(name) ep_out_config(name, __FUNCTION__, &hs_out0_desc)
 
 static unsigned long fill_in_buf(void *buf, unsigned long nbytes) {
@@ -861,30 +891,23 @@ static void stop_io() {
 
 /*-------------------------------------------------------------------------*/
 
-static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
-                          const struct usb_endpoint_descriptor **ep2) {
+static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep) {
     struct usb_config_descriptor *c;
-    int i;
+    int i, j = 0, k;
 
     c = (struct usb_config_descriptor *)cp;
 
     memcpy(cp, &config, sizeof config);
     cp += sizeof config;
 
-    memcpy(cp, &in_out_intf0, sizeof in_out_intf0);
-    cp += in_out_intf0.bLength;
+    for (i = 0; i < sizeof(hs_intfs) / sizeof(in_out_intf0); i++) {
+        memcpy(cp, hs_intfs[i], hs_intfs[i]->bLength);
+        cp += in_out_intf0.bLength;
 
-    for (i = 0; i < in_out_intf0.bNumEndpoints; i++) {
-        memcpy(cp, ep1[i], USB_DT_ENDPOINT_SIZE);
-        cp += USB_DT_ENDPOINT_SIZE;
-    }
-
-    memcpy(cp, &in_out_intf1, sizeof in_out_intf1);
-    cp += in_out_intf1.bLength;
-
-    for (i = 0; i < in_out_intf1.bNumEndpoints; i++) {
-        memcpy(cp, ep2[i], USB_DT_ENDPOINT_SIZE);
-        cp += USB_DT_ENDPOINT_SIZE;
+        for (k = 0; k < hs_intfs[i]->bNumEndpoints; k++, j++) {
+            memcpy(cp, ep[j], USB_DT_ENDPOINT_SIZE);
+            cp += USB_DT_ENDPOINT_SIZE;
+        }
     }
 
     c->wTotalLength = __cpu_to_le16(cp - (char *)c);
@@ -892,6 +915,7 @@ static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep1,
 }
 
 static int init_device(void) {
+    // todo : adjust buf size, bc the camera descriptor is more than 5k
     char buf[4096], *cp = &buf[0];
     int fd;
     int status;
@@ -911,8 +935,8 @@ static int init_device(void) {
     *(__u32 *)cp = 0; /* tag for this format */
     cp += 4;
 
-    cp = build_config(cp, hs_eps1, hs_eps2);
-    cp = build_config(cp, hs_eps1, hs_eps2);
+    cp = build_config(cp, hs_eps);
+    cp = build_config(cp, hs_eps);
 
     /* and device descriptor at the end */
     memcpy(cp, &device_desc, sizeof device_desc);
