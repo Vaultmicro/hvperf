@@ -3,24 +3,25 @@
  * $(CROSS_COMPILE)cc -Wall -DAIO -g -o usb usb.c usbstring.c -lpthread -laio
  */
 
+
 /*!*********************************************************************
  *   hvperf.c
- *   Version     : V1.0.2
+ *   Version     : V1.0.3
  *   Author      : usiop-vault
  * 
- *   This is an example pthreaded USER MODE driver implementing a
- *   USB Gadget/Device with simple bulk in/out functionality.
- *   you could implement pda sync software this way, or some usb class
- *   protocols (printers, test-and-measurement equipment, and so on).
+ * This is an example pthreaded USER MODE driver implementing a
+ * USB Gadget/Device with simple bulk in/out functionality.
+ * you could implement pda sync software this way, or some usb class
+ * protocols (printers, test-and-measurement equipment, and so on).
  *
- *   with hardware that also supports isochronous data transfers, this
- *   can stream data using multi-buffering and AIO.  that's the way to
- *   handle audio or video data, where on-time delivery is essential.
+ * with hardware that also supports isochronous data transfers, this
+ * can stream data using multi-buffering and AIO.  that's the way to
+ * handle audio or video data, where on-time delivery is essential.
  *
- *   needs "gadgetfs" and a supported USB device controller driver
- *   in the kernel; this autoconfigures, based on the driver it finds.
+ * needs "gadgetfs" and a supported USB device controller driver
+ * in the kernel; this autoconfigures, based on the driver it finds.
  *
- *   
+ *
  *********************************************************************!*/
 
 #include <errno.h>
@@ -229,7 +230,7 @@ static char serial[64];
 static struct usb_string stringtab[] = {
     {
         STRINGID_MFGR,
-        "Licensed to Inc.VaultMicro",
+        "Licensed to VaultMicro",
     },
     {
         STRINGID_PRODUCT,
@@ -249,7 +250,7 @@ static struct usb_string stringtab[] = {
     },
     {
         STRINGID_INTERFACE1,
-        "intf1altf0",
+        "interface1",
     },
 };
 
@@ -296,9 +297,10 @@ static int autoconfig() {
      */
     device_desc.idProduct = __constant_cpu_to_le16(DRIVER_ISO_PRODUCT_NUM);
 
-    /* NetChip 2280 PCI device or dummy_hcd, high/full speed */
     if (stat(DEVNAME = "fe980000.usb", &statb) == 0) {
         unsigned bInterval;
+
+        bInterval = interval;
 
         HIGHSPEED = 1;
         device_desc.bcdDevice = __constant_cpu_to_le16(0x0103);
@@ -396,7 +398,6 @@ static int ep_config(char *name, const char *label, const struct usb_endpoint_de
     }
 
     /* one (fs or ls) or two (fs + hs) sets of config descriptors */
-
     *(__u32 *)cp = 1; /* tag for this format */
     cp += 4;
 
@@ -428,7 +429,6 @@ static int ep_config(char *name, const char *label, const struct usb_endpoint_de
     }
     return fd;
 }
-
 
 #define in_open(name) ep_config(name, __FUNCTION__, hs_in_eps)
 #define out_open(name) ep_config(name, __FUNCTION__, hs_out_eps)
@@ -823,12 +823,6 @@ static void start_io() {
      * polls that queue once per interval.
      */
     switch (current_speed) {
-    case USB_SPEED_FULL:
-        if (iso)
-            iosize = __le16_to_cpup(&hs_in_desc.wMaxPacketSize);
-        else
-            iosize = bufsize;
-        break;
     case USB_SPEED_HIGH:
         /* for iso, we updated bufsize earlier */
         if (hs_in1_desc.wMaxPacketSize > 1024) {
@@ -1056,7 +1050,7 @@ static void handle_control(int fd, struct usb_ctrlrequest *setup) {
         status = write(fd, buf, length);
         if (status < 0) {
             if (errno == EIDRM)
-                fprintf(stderr, "GET_INTERFACE timeout\n");
+                fprintf(stderr, "GET_INTERFACE timeout %s\n", strerror(errno));
             else
                 perror("write GET_INTERFACE data");
         } else if (status != length) {
