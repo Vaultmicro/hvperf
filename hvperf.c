@@ -396,6 +396,7 @@ static int ep_config(char *name, const char *label, const struct usb_endpoint_de
     }
 
     /* one (fs or ls) or two (fs + hs) sets of config descriptors */
+
     *(__u32 *)cp = 1; /* tag for this format */
     cp += 4;
 
@@ -427,6 +428,7 @@ static int ep_config(char *name, const char *label, const struct usb_endpoint_de
     }
     return fd;
 }
+
 
 #define in_open(name) ep_config(name, __FUNCTION__, hs_in_eps)
 #define out_open(name) ep_config(name, __FUNCTION__, hs_out_eps)
@@ -821,6 +823,12 @@ static void start_io() {
      * polls that queue once per interval.
      */
     switch (current_speed) {
+    case USB_SPEED_FULL:
+        if (iso)
+            iosize = __le16_to_cpup(&hs_in_desc.wMaxPacketSize);
+        else
+            iosize = bufsize;
+        break;
     case USB_SPEED_HIGH:
         /* for iso, we updated bufsize earlier */
         if (hs_in1_desc.wMaxPacketSize > 1024) {
