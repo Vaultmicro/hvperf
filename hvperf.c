@@ -126,11 +126,11 @@ static struct usb_interface_descriptor in_out_intf1_alt0 = {
 static struct usb_interface_descriptor in_out_intf1_alt1 = {
     .bLength = sizeof in_out_intf1_alt1,
     .bDescriptorType = USB_DT_INTERFACE,
-    .bInterfaceNumber = 2,
+    .bInterfaceNumber = 1,
     .bAlternateSetting = 1,
     .bNumEndpoints = 1,
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
-    .iInterface = STRINGID_INTERFACE1_ALTERNATE_SETTING_1,
+    .iInterface = STRINGID_INTERFACE1_ALTERNATE_SETTING_0,
 };
 
 /* High speed configurations are used only in addition to a full-speed
@@ -166,7 +166,6 @@ static struct usb_endpoint_descriptor hs_in1_desc = {
 static const struct usb_interface_descriptor *hs_intfs[] = {
     &in_out_intf0,
     &in_out_intf1_alt0,
-    &in_out_intf1_alt1,
 };
 
 static const struct usb_endpoint_descriptor *hs_eps[] = {
@@ -325,7 +324,7 @@ static int autoconfig() {
         hs_out0_desc.bmAttributes = USB_ENDPOINT_XFER_BULK;
         hs_in1_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
 
-        hs_in1_desc.wMaxPacketSize = 1024;
+        hs_in1_desc.wMaxPacketSize = 5120;
 
         hs_in0_desc.bInterval = hs_in1_desc.bInterval = bInterval;
 
@@ -413,45 +412,15 @@ static int ep_config(char *name, const char *label, const struct usb_endpoint_de
     int i;
     int num_endpoints = sizeof(hs_eps) / sizeof(hs_eps[0]);
 
-    for (i = 0; i < num_endpoints; i++) {
-        memcpy(cp, hs[i], USB_DT_ENDPOINT_SIZE);
-        cp += USB_DT_ENDPOINT_SIZE;
-    }
+    memcpy(cp, hs[1], USB_DT_ENDPOINT_SIZE);
+    cp += USB_DT_ENDPOINT_SIZE;
+
+    // for (i = 0; i < num_endpoints; i++) {
+    //     memcpy(cp, hs[i], USB_DT_ENDPOINT_SIZE);
+    //     cp += USB_DT_ENDPOINT_SIZE;
+    // }
 
     status = write(fd, buf, cp - buf);
-    if (status < 0) {
-        status = -errno;
-        fprintf(stderr, "%s config %s error %d (%s)\n", label, name, errno, strerror(errno));
-        close(fd);
-        return status;
-    } else if (verbose) {
-        unsigned long id;
-
-        id = pthread_self();
-        fprintf(stderr, "%s start %ld fd %d\n", label, id, fd);
-    }
-    return fd;
-}
-
-static int ep_out_config(char *name, const char *label, struct usb_endpoint_descriptor *hs) {
-    int fd, status;
-    char buf[USB_BUFSIZE];
-
-    /* open and initialize with endpoint descriptor(s) */
-    fd = open(name, O_RDWR);
-    if (fd < 0) {
-        status = -errno;
-        fprintf(stderr, "%s open %s error %d (%s)\n", label, name, errno, strerror(errno));
-        return status;
-    }
-
-    /* one (fs or ls) or two (fs + hs) sets of config descriptors */
-    *(__u32 *)buf = 1; /* tag for this format */
-    memcpy(buf + 4, hs, USB_DT_ENDPOINT_SIZE);
-    if (HIGHSPEED) {
-        memcpy(buf + 4 + USB_DT_ENDPOINT_SIZE, hs, sizeof hs);
-    }
-    status = write(fd, buf, 4 + USB_DT_ENDPOINT_SIZE + (HIGHSPEED ? USB_DT_ENDPOINT_SIZE : 0));
     if (status < 0) {
         status = -errno;
         fprintf(stderr, "%s config %s error %d (%s)\n", label, name, errno, strerror(errno));
@@ -861,10 +830,10 @@ static void start_io() {
     switch (current_speed) {
     case USB_SPEED_HIGH:
         /* for iso, we updated bufsize earlier */
-        if (hs_in0_desc.wMaxPacketSize > 1024) {
+        if (hs_in1_desc.wMaxPacketSize > 1024) {
             iosize = 3072;
         } else {
-            iosize = hs_in0_desc.wMaxPacketSize;
+            iosize = hs_in1_desc.wMaxPacketSize;
         }
         break;
     default:
@@ -885,7 +854,7 @@ static void start_io() {
      * why?  this clearly doesn't ...
      */
 
-    if (pthread_create(&in, 0, in_thread, (void *)EP_IN0_NAME) != 0) {
+    if (pthread_create(&in, 0, in_thread, (void *)EP_IN1_NAME) != 0) {
         perror("can't create in thread");
         goto cleanup;
     }
