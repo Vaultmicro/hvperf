@@ -3,25 +3,24 @@
  * $(CROSS_COMPILE)cc -Wall -DAIO -g -o usb usb.c usbstring.c -lpthread -laio
  */
 
-/*
- * this is an example pthreaded USER MODE driver implementing a
- * USB Gadget/Device with simple bulk source/sink functionality.
- * you could implement pda sync software this way, or some usb class
- * protocols (printers, test-and-measurement equipment, and so on).
- *
- * with hardware that also supports isochronous data transfers, this
- * can stream data using multi-buffering and AIO.  that's the way to
- * handle audio or video data, where on-time delivery is essential.
- *
- * needs "gadgetfs" and a supported USB device controller driver
- * in the kernel; this autoconfigures, based on the driver it finds.
- */
-
 /*!*********************************************************************
  *   hvperf.c
  *   Version     : V1.0.2
  *   Author      : usiop-vault
+ * 
+ *   This is an example pthreaded USER MODE driver implementing a
+ *   USB Gadget/Device with simple bulk in/out functionality.
+ *   you could implement pda sync software this way, or some usb class
+ *   protocols (printers, test-and-measurement equipment, and so on).
  *
+ *   with hardware that also supports isochronous data transfers, this
+ *   can stream data using multi-buffering and AIO.  that's the way to
+ *   handle audio or video data, where on-time delivery is essential.
+ *
+ *   needs "gadgetfs" and a supported USB device controller driver
+ *   in the kernel; this autoconfigures, based on the driver it finds.
+ *
+ *   
  *********************************************************************!*/
 
 #include <errno.h>
@@ -77,8 +76,7 @@ static int pattern;
 #define STRINGID_SERIAL 3
 #define STRINGID_CONFIG 4
 #define STRINGID_INTERFACE0 5
-#define STRINGID_INTERFACE1_ALTERNATE_SETTING_0 6
-#define STRINGID_INTERFACE1_ALTERNATE_SETTING_1 7
+#define STRINGID_INTERFACE1 6
 
 static struct usb_device_descriptor device_desc = {
     .bLength = sizeof device_desc,
@@ -119,7 +117,7 @@ static struct usb_interface_descriptor in_out_intf1_alt0 = {
     .bAlternateSetting = 0,
     .bNumEndpoints = 1,
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
-    .iInterface = STRINGID_INTERFACE1_ALTERNATE_SETTING_0,
+    .iInterface = STRINGID_INTERFACE1,
 };
 
 // Alternate Setting 1 for wMaxPacketSize : 5120
@@ -130,7 +128,7 @@ static struct usb_interface_descriptor in_out_intf1_alt1 = {
     .bAlternateSetting = 1,
     .bNumEndpoints = 1,
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
-    .iInterface = STRINGID_INTERFACE1_ALTERNATE_SETTING_0,
+    .iInterface = STRINGID_INTERFACE1,
 };
 
 /* High speed configurations are used only in addition to a full-speed
@@ -231,11 +229,11 @@ static char serial[64];
 static struct usb_string stringtab[] = {
     {
         STRINGID_MFGR,
-        "Licensed to Code, LLC",
+        "Licensed to Inc.VaultMicro",
     },
     {
         STRINGID_PRODUCT,
-        "My Source/Sink Product",
+        "hvperf",
     },
     {
         STRINGID_SERIAL,
@@ -247,15 +245,11 @@ static struct usb_string stringtab[] = {
     },
     {
         STRINGID_INTERFACE0,
-        "intf0",
+        "interface0",
     },
     {
-        STRINGID_INTERFACE1_ALTERNATE_SETTING_0,
+        STRINGID_INTERFACE1,
         "intf1altf0",
-    },
-    {
-        STRINGID_INTERFACE1_ALTERNATE_SETTING_1,
-        "intf1altf1",
     },
 };
 
@@ -304,7 +298,7 @@ static int autoconfig() {
 
     /* NetChip 2280 PCI device or dummy_hcd, high/full speed */
     if (stat(DEVNAME = "fe980000.usb", &statb) == 0) {
-        unsigned bInterval, wMaxPacketSize;
+        unsigned bInterval;
 
         HIGHSPEED = 1;
         device_desc.bcdDevice = __constant_cpu_to_le16(0x0103);
@@ -346,15 +340,15 @@ static int autoconfig() {
 
 /*-------------------------------------------------------------------------*/
 
-/* full duplex data, with at least three threads: ep0, sink, and source */
+/* full duplex data, with at least three threads: ep0, out, and in */
 
 static pthread_t ep0;
 
-static pthread_t source;
-static int source_fd = -1;
+static pthread_t in;
+static int in_fd = -1;
 
-static pthread_t sink;
-static int sink_fd = -1;
+static pthread_t out;
+static int out_fd = -1;
 
 // FIXME no status i/o yet
 
@@ -509,17 +503,17 @@ static int empty_out_buf(void *buf, unsigned long nbytes) {
     return len;
 }
 
-static void *simple_source_thread(void *param) {
+static void *simple_in_thread(void *param) {
     char *name = (char *)param;
     int status;
     char buf[USB_BUFSIZE];
 
-    status = source_open(name);
+    status = in_open(name);
     if (status < 0)
         return 0;
-    source_fd = status;
+    in_fd = status;
 
-    pthread_cleanup_push(close_fd, &source_fd);
+    pthread_cleanup_push(close_fd, &in_fd);
     do {
         unsigned long len;
 
@@ -530,7 +524,7 @@ static void *simple_source_thread(void *param) {
 
         len = fill_in_buf(buf, sizeof buf);
         if (len > 0)
-            status = write(source_fd, buf, len);
+            status = write(in_fd, buf, len);
         else
             status = 0;
 
@@ -547,25 +541,25 @@ static void *simple_source_thread(void *param) {
     return 0;
 }
 
-static void *simple_sink_thread(void *param) {
+static void *simple_out_thread(void *param) {
     char *name = (char *)param;
     int status;
     char buf[USB_BUFSIZE];
 
-    status = sink_open(name);
+    status = out_open(name);
     if (status < 0)
         return 0;
-    sink_fd = status;
+    out_fd = status;
 
     /* synchronous reads of endless streams of data */
-    pthread_cleanup_push(close_fd, &sink_fd);
+    pthread_cleanup_push(close_fd, &out_fd);
     do {
         /* original LinuxThreads cancelation didn't work right
          * so test for it explicitly.
          */
         pthread_testcancel();
         errno = 0;
-        status = read(sink_fd, buf, sizeof buf);
+        status = read(out_fd, buf, sizeof buf);
 
         if (status < 0)
             break;
@@ -583,8 +577,8 @@ static void *simple_sink_thread(void *param) {
     return 0;
 }
 
-static void *(*source_thread)(void *);
-static void *(*sink_thread)(void *);
+static void *(*in_thread)(void *);
+static void *(*out_thread)(void *);
 
 #ifdef AIO
 
@@ -671,11 +665,11 @@ static void *aio_in_thread(void *param) {
     struct iocb *queue, *iocb;
     unsigned i;
 
-    status = source_open(name);
+    status = in_open(name);
     if (status < 0)
         return 0;
-    source_fd = status;
-    pthread_cleanup_push(close_fd, &source_fd);
+    in_fd = status;
+    pthread_cleanup_push(close_fd, &in_fd);
 
     /* initialize i/o queue */
     status = io_setup(aio_in, &ctx);
@@ -699,7 +693,7 @@ static void *aio_in_thread(void *param) {
         }
 
         /* host receives the data we're writing */
-        io_prep_pwrite(iocb, source_fd, buf, fill_in_buf(buf, iosize), 0);
+        io_prep_pwrite(iocb, in_fd, buf, fill_in_buf(buf, iosize), 0);
         io_set_callback(iocb, in_complete);
         iocb->key = USB_DIR_IN;
 
@@ -762,11 +756,11 @@ static void *aio_out_thread(void *param) {
     struct iocb *queue, *iocb;
     unsigned i;
 
-    status = sink_open(name);
+    status = out_open(name);
     if (status < 0)
         return 0;
-    sink_fd = status;
-    pthread_cleanup_push(close_fd, &sink_fd);
+    out_fd = status;
+    pthread_cleanup_push(close_fd, &out_fd);
 
     /* initialize i/o queue */
     status = io_setup(aio_out, &ctx);
@@ -790,7 +784,7 @@ static void *aio_out_thread(void *param) {
         }
 
         /* data can be processed in out_complete() */
-        io_prep_pread(iocb, sink_fd, buf, iosize, 0);
+        io_prep_pread(iocb, out_fd, buf, iosize, 0);
         io_set_callback(iocb, out_complete);
         iocb->key = USB_DIR_OUT;
 
@@ -874,18 +868,18 @@ cleanup:
 }
 
 static void stop_io() {
-    if (!pthread_equal(source, ep0)) {
-        pthread_cancel(source);
-        if (pthread_join(source, 0) != 0)
-            perror("can't join source thread");
-        source = ep0;
+    if (!pthread_equal(in, ep0)) {
+        pthread_cancel(in);
+        if (pthread_join(in, 0) != 0)
+            perror("can't join in thread");
+        in = ep0;
     }
 
-    if (!pthread_equal(sink, ep0)) {
-        pthread_cancel(sink);
-        if (pthread_join(sink, 0) != 0)
-            perror("can't join sink thread");
-        sink = ep0;
+    if (!pthread_equal(out, ep0)) {
+        pthread_cancel(out);
+        if (pthread_join(out, 0) != 0)
+            perror("can't join out thread");
+        out = ep0;
     }
 }
 
@@ -1067,13 +1061,13 @@ static void handle_control(int fd, struct usb_ctrlrequest *setup) {
         fprintf(stderr, "SET INTERFACE\n");
         /* just reset toggle/halt for the interface's endpoints */
         status = 0;
-        if (ioctl(source_fd, GADGETFS_CLEAR_HALT) < 0) {
+        if (ioctl(in_fd, GADGETFS_CLEAR_HALT) < 0) {
             status = errno;
-            perror("reset source fd");
+            perror("reset in fd");
         }
-        if (ioctl(sink_fd, GADGETFS_CLEAR_HALT) < 0) {
+        if (ioctl(out_fd, GADGETFS_CLEAR_HALT) < 0) {
             status = errno;
-            perror("reset sink fd");
+            perror("reset out fd");
         }
         /* FIXME eventually reset the status endpoint too */
         if (status)
@@ -1138,7 +1132,7 @@ static void *ep0_thread(void *param) {
     time_t now, last;
     struct pollfd ep0_poll;
 
-    source = sink = ep0 = pthread_self();
+    in = out = ep0 = pthread_self();
     pthread_cleanup_push(close_fd, param);
 
     /* REVISIT signal handling ... normally one pthread should
@@ -1263,8 +1257,8 @@ int main(int argc, char **argv) {
             serial[i++] = c;
     }
 
-    source_thread = simple_source_thread;
-    sink_thread = simple_sink_thread;
+    in_thread = simple_in_thread;
+    out_thread = simple_out_thread;
 
     while ((c = getopt(argc, argv, "I:a:i:o:p:r:s:v")) != EOF) {
         switch (c) {
@@ -1276,21 +1270,21 @@ int main(int argc, char **argv) {
              * ignored if high bandwidth could kick in
              */
             interval = atoi(optarg);
-            source_thread = aio_in_thread;
-            sink_thread = aio_out_thread;
+            in_thread = aio_in_thread;
+            out_thread = aio_out_thread;
             continue;
         case 'a': /* aio IN/OUT qlen */
             aio_in = aio_out = atoi(optarg);
-            source_thread = aio_in_thread;
-            sink_thread = aio_out_thread;
+            in_thread = aio_in_thread;
+            out_thread = aio_out_thread;
             continue;
         case 'i': /* aio IN qlen */
             aio_in = atoi(optarg);
-            source_thread = aio_in_thread;
+            in_thread = aio_in_thread;
             continue;
         case 'o': /* aio OUT qlen */
             aio_out = atoi(optarg);
-            sink_thread = aio_out_thread;
+            out_thread = aio_out_thread;
             continue;
         case 's': /* iso buffer size */
             /* for iso, "-s 1025" and higher is high bandwidth */
