@@ -3,12 +3,11 @@
  * $(CROSS_COMPILE)cc -Wall -DAIO -g -o usb usb.c usbstring.c -lpthread -laio
  */
 
-
 /*!*********************************************************************
  *   hvperf.c
  *   Version     : V1.0.3
  *   Author      : usiop-vault
- * 
+ *
  * This is an example pthreaded USER MODE driver implementing a
  * USB Gadget/Device with simple bulk in/out functionality.
  * you could implement pda sync software this way, or some usb class
@@ -100,8 +99,8 @@ static struct usb_device_descriptor device_desc = {
 
 #define CONFIG_VALUE 1
 
-static struct usb_interface_descriptor in_out_intf0 = {
-    .bLength = sizeof in_out_intf0,
+static struct usb_interface_descriptor fs_intf0 = {
+    .bLength = sizeof fs_intf0,
     .bDescriptorType = USB_DT_INTERFACE,
     .bInterfaceNumber = 0,
     .bAlternateSetting = 0,
@@ -111,8 +110,8 @@ static struct usb_interface_descriptor in_out_intf0 = {
 };
 
 // Alternate Setting 0 for wMaxPacketSize : 1024
-static struct usb_interface_descriptor in_out_intf1_alt0 = {
-    .bLength = sizeof in_out_intf1_alt0,
+static struct usb_interface_descriptor fs_intf1 = {
+    .bLength = sizeof fs_intf1,
     .bDescriptorType = USB_DT_INTERFACE,
     .bInterfaceNumber = 1,
     .bAlternateSetting = 0,
@@ -121,9 +120,30 @@ static struct usb_interface_descriptor in_out_intf1_alt0 = {
     .iInterface = STRINGID_INTERFACE1,
 };
 
+static struct usb_interface_descriptor hs_intf0 = {
+    .bLength = sizeof hs_intf0,
+    .bDescriptorType = USB_DT_INTERFACE,
+    .bInterfaceNumber = 0,
+    .bAlternateSetting = 0,
+    .bNumEndpoints = 2,
+    .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
+    .iInterface = STRINGID_INTERFACE0,
+};
+
+// Alternate Setting 0 for wMaxPacketSize : 1024
+static struct usb_interface_descriptor hs_intf1_alt0 = {
+    .bLength = sizeof hs_intf1_alt0,
+    .bDescriptorType = USB_DT_INTERFACE,
+    .bInterfaceNumber = 1,
+    .bAlternateSetting = 0,
+    .bNumEndpoints = 0,
+    .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
+    .iInterface = STRINGID_INTERFACE1,
+};
+
 // Alternate Setting 1 for wMaxPacketSize : 5120
-static struct usb_interface_descriptor in_out_intf1_alt1 = {
-    .bLength = sizeof in_out_intf1_alt1,
+static struct usb_interface_descriptor hs_intf1_alt1 = {
+    .bLength = sizeof hs_intf1_alt1,
     .bDescriptorType = USB_DT_INTERFACE,
     .bInterfaceNumber = 1,
     .bAlternateSetting = 1,
@@ -163,8 +183,9 @@ static struct usb_endpoint_descriptor hs_in1_desc = {
 };
 
 static const struct usb_interface_descriptor *hs_intfs[] = {
-    &in_out_intf0,
-    &in_out_intf1_alt0,
+    &hs_intf0,
+    &hs_intf1_alt0,
+    &hs_intf1_alt1,
 };
 
 static const struct usb_endpoint_descriptor *hs_eps[] = {
@@ -182,14 +203,62 @@ static const struct usb_endpoint_descriptor *hs_out_eps[] = {
     &hs_out0_desc,
 };
 
+static struct usb_endpoint_descriptor fs_in0_desc = {
+    .bLength = USB_DT_ENDPOINT_SIZE,
+    .bDescriptorType = USB_DT_ENDPOINT,
+
+    .bmAttributes = USB_ENDPOINT_XFER_BULK,
+    .wMaxPacketSize = __constant_cpu_to_le16(64),
+};
+
+static struct usb_endpoint_descriptor fs_out0_desc = {
+    .bLength = USB_DT_ENDPOINT_SIZE,
+    .bDescriptorType = USB_DT_ENDPOINT,
+
+    .bmAttributes = USB_ENDPOINT_XFER_BULK,
+    .wMaxPacketSize = __constant_cpu_to_le16(64),
+    .bInterval = 1,
+};
+
+static struct usb_endpoint_descriptor fs_in1_desc = {
+    .bLength = USB_DT_ENDPOINT_SIZE,
+    .bDescriptorType = USB_DT_ENDPOINT,
+    
+    .bmAttributes = USB_ENDPOINT_XFER_ISOC,
+    .wMaxPacketSize = __constant_cpu_to_le16(1023),
+    .bInterval = 1
+};
+
+static const struct usb_interface_descriptor *fs_intfs[] = {
+    &fs_intf0,
+    &fs_intf1,
+};
+
+static const struct usb_endpoint_descriptor *fs_eps[] = {
+    &fs_in0_desc,
+    &fs_out0_desc,
+    &fs_in1_desc,
+};
+
+static const struct usb_endpoint_descriptor *fs_in_eps[] = {
+    &fs_in0_desc,
+    &fs_in1_desc,
+};
+
+static const struct usb_endpoint_descriptor *fs_out_eps[] = {
+    &fs_out0_desc,
+};
+
 static const struct usb_config_descriptor config = {
     .bLength = sizeof config,
     .bDescriptorType = USB_DT_CONFIG,
 
     /* must compute wTotalLength ... */
     .bNumInterfaces = 2,
-    .wTotalLength = sizeof(config) + sizeof(in_out_intf0) + sizeof(in_out_intf1_alt0) +
-                    sizeof(hs_in0_desc) + sizeof(hs_out0_desc) + sizeof(hs_in1_desc),
+    .wTotalLength = sizeof(config) + sizeof(hs_intf0) + sizeof(hs_intf1_alt0) +
+                    sizeof(hs_intf1_alt1) + sizeof(hs_in0_desc) + sizeof(hs_out0_desc) +
+                    sizeof(hs_in1_desc) + sizeof(fs_intf0) + sizeof(fs_intf1) +
+                    sizeof(fs_in0_desc) + sizeof(fs_out0_desc) + sizeof(fs_in1_desc),
     .bConfigurationValue = CONFIG_VALUE,
     .iConfiguration = STRINGID_CONFIG,
     .bmAttributes = USB_CONFIG_ATT_ONE | USB_CONFIG_ATT_SELFPOWER,
@@ -308,8 +377,12 @@ static int autoconfig() {
         unsigned short wMaxPacketSize = (unsigned short)bufsize;
 
         hs_in0_desc.bEndpointAddress = USB_DIR_IN | 1;
-        hs_out0_desc.bEndpointAddress = USB_DIR_OUT | 1;
+        hs_out0_desc.bEndpointAddress = USB_DIR_OUT | 0xe;
         hs_in1_desc.bEndpointAddress = USB_DIR_IN | 2;
+
+        fs_in0_desc.bEndpointAddress = USB_DIR_IN | 1;
+        fs_out0_desc.bEndpointAddress = USB_DIR_OUT | 0xe;
+        fs_in1_desc.bEndpointAddress = USB_DIR_IN | 7;
 
         EP_IN0_NAME = "ep1in";
         EP_OUT0_NAME = "ep1out";
@@ -323,9 +396,9 @@ static int autoconfig() {
 
         hs_in0_desc.bInterval = hs_in1_desc.bInterval = bInterval;
 
-        in_out_intf0.bNumEndpoints = 2;
-        in_out_intf1_alt0.bNumEndpoints = 1;
-        in_out_intf1_alt1.bNumEndpoints = 1;
+        hs_intf0.bNumEndpoints = 2;
+        hs_intf1_alt0.bNumEndpoints = 1;
+        hs_intf1_alt1.bNumEndpoints = 1;
 
         /* Atmel AT91 processors, full speed only */
     } else {
@@ -887,7 +960,31 @@ static void stop_io() {
 
 /*-------------------------------------------------------------------------*/
 
-static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep) {
+static char *fs_build_config(char *cp, const struct usb_endpoint_descriptor **ep) {
+    struct usb_config_descriptor *c;
+    int i, j = 0, k;
+    int num_intf = sizeof(fs_intfs) / sizeof(fs_intfs[0]);
+
+    c = (struct usb_config_descriptor *)cp;
+
+    memcpy(cp, &config, sizeof config);
+    cp += sizeof config;
+
+    for (i = 0; i < num_intf; i++) {
+        memcpy(cp, fs_intfs[i], fs_intfs[i]->bLength);
+        cp += fs_intfs[i]->bLength;
+
+        for (k = 0; k < fs_intfs[i]->bNumEndpoints; k++, j++) {
+            memcpy(cp, ep[j], USB_DT_ENDPOINT_SIZE);
+            cp += USB_DT_ENDPOINT_SIZE;
+        }
+    }
+
+    c->wTotalLength = __cpu_to_le16(cp - (char *)c);
+    return cp;
+}
+
+static char *hs_build_config(char *cp, const struct usb_endpoint_descriptor **ep) {
     struct usb_config_descriptor *c;
     int i, j = 0, k;
     int num_intf = sizeof(hs_intfs) / sizeof(hs_intfs[0]);
@@ -932,8 +1029,8 @@ static int init_device(void) {
     *(__u32 *)cp = 0; /* tag for this format */
     cp += 4;
 
-    cp = build_config(cp, hs_eps); // compensate full_speed
-    cp = build_config(cp, hs_eps);
+    cp = fs_build_config(cp, fs_eps);
+    cp = hs_build_config(cp, hs_eps);
 
     /* and device descriptor at the end */
     memcpy(cp, &device_desc, sizeof device_desc);
