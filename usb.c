@@ -70,7 +70,7 @@ static int pattern;
 #define STRINGID_SERIAL 3
 #define STRINGID_CONFIG 4
 #define STRINGID_INTERFACE0 5
-#define STRINGID_INTERFACE1 5
+#define STRINGID_INTERFACE1 6
 
 static struct usb_device_descriptor device_desc = {
     .bLength = sizeof device_desc,
@@ -618,8 +618,13 @@ static void *aio_in_thread(void *param) {
     status = iso_in_open(name);
     if (status < 0)
         return 0;
-    bulk_in_fd = status;
+    iso_in_fd = status;
     pthread_cleanup_push(close_fd, &iso_in_fd);
+
+    if (aio_in == 0)
+    {
+        aio_in = 1;
+    }
 
     /* initialize i/o queue */
     status = io_setup(aio_in, &ctx);
@@ -629,8 +634,6 @@ static void *aio_in_thread(void *param) {
     }
     pthread_cleanup_push(queue_release, &ctx);
 
-    if (aio_in == 0)
-        aio_in = 1;
     queue = alloca(aio_in * sizeof *iocb);
 
     /* populate and (re)run the queue */
@@ -643,7 +646,7 @@ static void *aio_in_thread(void *param) {
         }
 
         /* host receives the data we're writing */
-        io_prep_pwrite(iocb, bulk_in_fd, buf, fill_in_buf(buf, iosize), 0);
+        io_prep_pwrite(iocb, iso_in_fd, buf, fill_in_buf(buf, iosize), 0);
         io_set_callback(iocb, in_complete);
         iocb->key = USB_DIR_IN;
 
@@ -703,10 +706,10 @@ static pthread_mutex_t io_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 unsigned int calc_iosize() {
     // TODO: !!! change to correct action
-    return 1024;
 
     u_int8_t mc = (hs_iso_in_desc.wMaxPacketSize & 0x1800) >> 11;
-    return ((mc + 1) * 1024);
+    u_int32_t mps =(mc==0)?hs_iso_in_desc.wMaxPacketSize:((mc + 1) * 1024);
+    return mps;
 }
 
 static void start_io(u_int8_t flag) {
@@ -724,7 +727,6 @@ static void start_io(u_int8_t flag) {
     case USB_SPEED_HIGH:
         /* for iso, we updated bufsize earlier */
         // iosize = calc_iosize();
-        iosize = 1024;
         break;
     default:
         fprintf(stderr, "bogus link speed %d\n", current_speed);
@@ -741,7 +743,7 @@ static void start_io(u_int8_t flag) {
     }
 
     pthread_mutex_lock(&io_mutex);
-    
+
     if (!flag) {
         if (pthread_create(&bulk_in, 0, bulk_in_thread, (void *)EP_IN_NAME) != 0) {
             perror("can't create bulk_in thread");
@@ -759,12 +761,6 @@ static void start_io(u_int8_t flag) {
             fprintf(stderr, "%s thread started...\n", EP_OUT_NAME);
         }
 
-        if (pthread_create(&iso_in, 0, iso_in_thread, (void *)EP_ISO_IN_NAME) != 0) {
-            perror("can't create bulk_out thread");
-            goto cleanup;
-        } else {
-            fprintf(stderr, "%s thread started...\n", EP_ISO_IN_NAME);
-        }
     } else {
         if (pthread_create(&iso_in, 0, iso_in_thread, (void *)EP_ISO_IN_NAME) != 0) {
             perror("can't create bulk_out thread");
@@ -808,12 +804,6 @@ static void stop_io(u_int8_t flag) {
             if (pthread_join(bulk_out, 0) != 0)
                 perror("can't join bulk_out thread");
             bulk_out = ep0;
-        }
-
-        if (!pthread_equal(iso_in, ep0)) {
-            pthread_cancel(iso_in);
-            fprintf(stderr, "%s thread stopped...\n", EP_ISO_IN_NAME);
-            iso_in = ep0;
         }
     } else {
         if (!pthread_equal(iso_in, ep0)) {
