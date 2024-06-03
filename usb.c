@@ -52,9 +52,9 @@ static int pattern;
  * DO NOT REUSE THESE IDs with any protocol-incompatible driver!!  Ever!!
  * Instead:  allocate your own, using normal USB-IF procedures.
  */
-#define DRIVER_VENDOR_NUM 0x0526      /* NetChip */
+#define DRIVER_VENDOR_NUM 0x1004      /* NetChip */
 #define DRIVER_ISO_PRODUCT_NUM 0xa4a3 /* user mode iso bulk_out/bulk_in */
-#define DRIVER_PRODUCT_NUM 0xa4a4     /* user mode bulk_out/bulk_in */
+#define DRIVER_PRODUCT_NUM 0x61a1     /* user mode bulk_out/bulk_in */
 
 /* NOTE:  these IDs don't imply endpoint numbering; host side drivers
  * should use endpoint descriptors, or perhaps bcdDevice, to configure
@@ -190,7 +190,6 @@ static struct usb_endpoint_descriptor hs_iso_in_desc = {
     .bDescriptorType = USB_DT_ENDPOINT,
 
     .bmAttributes = USB_ENDPOINT_XFER_ISOC,
-    .wMaxPacketSize = __constant_cpu_to_le16(STATUS_MAXPACKET),
     .bInterval = 1,
 };
 
@@ -278,11 +277,11 @@ static int autoconfig() {
 
         fs_iso_in_desc.bEndpointAddress = hs_iso_in_desc.bEndpointAddress = USB_DIR_IN | 3;
         fs_iso_in_desc.bmAttributes = hs_iso_in_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
-        hs_iso_in_desc.wMaxPacketSize = 64;
-        // if (bufsize > 5120) {
-        //     fprintf(stderr, "Iso wMaxPacektSize is 0x1400, 5120bytes\n");
-        //     hs_iso_in_desc.wMaxPacketSize = 5120;
-        // }
+        hs_iso_in_desc.wMaxPacketSize = 1024;
+        if (hs_iso_in_desc.wMaxPacketSize > 5120) {
+            fprintf(stderr, "Iso wMaxPacketSize is 0x1400, 5120bytes\n");
+            hs_iso_in_desc.wMaxPacketSize = 5120;
+        }
         EP_ISO_IN_NAME = "ep3in";
 
         /* Atmel AT91 processors, full speed only */
@@ -609,20 +608,24 @@ clean:
     return;
 }
 
+#define BUFFER_COUNT 2
+
 static void *aio_in_thread(void *param) {
     char *name = (char *)param;
     int status;
     io_context_t ctx = 0;
-    struct iocb *queue, *iocb;
+    struct iocb *queue, *iocb[BUFFER_COUNT];
+    char *buf[BUFFER_COUNT];
     unsigned i;
+    int current_buffer = 0;
+
     status = iso_in_open(name);
     if (status < 0)
         return 0;
     iso_in_fd = status;
     pthread_cleanup_push(close_fd, &iso_in_fd);
 
-    if (aio_in == 0)
-    {
+    if (aio_in == 0) {
         aio_in = 1;
     }
 
@@ -634,30 +637,34 @@ static void *aio_in_thread(void *param) {
     }
     pthread_cleanup_push(queue_release, &ctx);
 
-    queue = alloca(aio_in * sizeof *iocb);
+    queue = alloca(aio_in * sizeof(struct iocb));
 
-    /* populate and (re)run the queue */
-    for (i = 0, iocb = queue; i < aio_in; i++, iocb++) {
-        char *buf = malloc(iosize);
-
-        if (!buf) {
+    /* allocate buffers */
+    for (i = 0; i < BUFFER_COUNT; i++) {
+        buf[i] = malloc(iosize);
+        if (!buf[i]) {
             fprintf(stderr, "%s can't get buffer[%d]\n", __FUNCTION__, i);
             return 0;
         }
+    }
 
-        /* host receives the data we're writing */
-        io_prep_pwrite(iocb, iso_in_fd, buf, fill_in_buf(buf, iosize), 0);
-        io_set_callback(iocb, in_complete);
-        iocb->key = USB_DIR_IN;
+    /* populate and (re)run the queue */
+    for (i = 0; i < aio_in; i++) {
+        current_buffer = i % BUFFER_COUNT;
+        io_prep_pwrite(&queue[i], iso_in_fd, buf[current_buffer],
+                       fill_in_buf(buf[current_buffer], iosize), 0);
+        io_set_callback(&queue[i], in_complete);
+        queue[i].key = USB_DIR_IN;
 
-        status = io_submit(ctx, 1, &iocb);
+        struct iocb *iocb_list[] = {&queue[i]};
+        status = io_submit(ctx, 1, iocb_list);
         if (status < 0) {
             perror(__FUNCTION__);
             break;
         }
         aio_in_pending++;
         if (verbose > 2)
-            fprintf(stderr, "%s submit uiocb %p\n", __FUNCTION__, iocb);
+            fprintf(stderr, "%s submit uiocb %p\n", __FUNCTION__, &queue[i]);
     }
 
     status = io_run(ctx, &aio_in_pending);
@@ -665,6 +672,9 @@ static void *aio_in_thread(void *param) {
         perror("aio_in_thread, io_run");
 
     /* clean up */
+    for (i = 0; i < BUFFER_COUNT; i++) {
+        free(buf[i]);
+    }
     fflush(stderr);
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
@@ -705,10 +715,8 @@ clean:
 static pthread_mutex_t io_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 unsigned int calc_iosize() {
-    // TODO: !!! change to correct action
-
     u_int8_t mc = (hs_iso_in_desc.wMaxPacketSize & 0x1800) >> 11;
-    u_int32_t mps =(mc==0)?hs_iso_in_desc.wMaxPacketSize:((mc + 1) * 1024);
+    u_int32_t mps = (mc == 0) ? hs_iso_in_desc.wMaxPacketSize : ((mc + 1) * 1024);
     return mps;
 }
 
@@ -726,7 +734,7 @@ static void start_io(u_int8_t flag) {
         break;
     case USB_SPEED_HIGH:
         /* for iso, we updated bufsize earlier */
-        // iosize = calc_iosize();
+        iosize = calc_iosize();
         break;
     default:
         fprintf(stderr, "bogus link speed %d\n", current_speed);
@@ -763,7 +771,7 @@ static void start_io(u_int8_t flag) {
 
     } else {
         if (pthread_create(&iso_in, 0, iso_in_thread, (void *)EP_ISO_IN_NAME) != 0) {
-            perror("can't create bulk_out thread");
+            perror("can't create iso_out thread");
             goto cleanup;
         } else {
             fprintf(stderr, "%s thread started...\n", EP_ISO_IN_NAME);
@@ -809,6 +817,8 @@ static void stop_io(u_int8_t flag) {
         if (!pthread_equal(iso_in, ep0)) {
             pthread_cancel(iso_in);
             fprintf(stderr, "%s thread stopped...\n", EP_ISO_IN_NAME);
+            if (pthread_join(iso_in, 0) != 0)
+                perror("can't join bulk_out thread");
             iso_in = ep0;
         }
     }
@@ -997,7 +1007,6 @@ static void handle_control(int fd, struct usb_ctrlrequest *setup) {
         fprintf(stderr, "SET INTERFACE i:%d, v:%d\n", setup->wIndex, value);
         if (value == 0) {
             fprintf(stderr, "Configuring for alternate setting 0\n");
-
             stop_io(1);
         } else if (value == 1) {
             fprintf(stderr, "Configuring for default alternate setting 1\n");
