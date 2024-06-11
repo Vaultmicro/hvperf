@@ -50,7 +50,7 @@
 
 #include "usbstring.h"
 
-static int verbose = 3;
+static int verbose = 0;
 static int pattern;
 
 /* Thanks to NetChip Technologies for donating this product ID.

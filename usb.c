@@ -44,7 +44,7 @@
 
 #include "usbstring.h"
 
-static int verbose = 3;
+static int verbose = 0;
 static int pattern;
 
 /* Thanks to NetChip Technologies for donating this product ID.
@@ -116,8 +116,11 @@ static struct usb_interface_descriptor interface0 = {
 static struct usb_interface_descriptor interface1 = {
     .bLength = sizeof interface1,
     .bDescriptorType = USB_DT_INTERFACE,
+    .bInterfaceNumber = 1,
 
     .bInterfaceClass = USB_CLASS_VENDOR_SPEC,
+    .bInterfaceSubClass = USB_CLASS_VENDOR_SPEC,
+    .bInterfaceProtocol = USB_CLASS_VENDOR_SPEC,
     .iInterface = STRINGID_INTERFACE1,
 };
 
@@ -277,7 +280,7 @@ static int autoconfig() {
 
         fs_iso_in_desc.bEndpointAddress = hs_iso_in_desc.bEndpointAddress = USB_DIR_IN | 3;
         fs_iso_in_desc.bmAttributes = hs_iso_in_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
-        hs_iso_in_desc.wMaxPacketSize = 1024;
+        hs_iso_in_desc.wMaxPacketSize = 5120;
         if (hs_iso_in_desc.wMaxPacketSize > 5120) {
             fprintf(stderr, "Iso wMaxPacketSize is 0x1400, 5120bytes\n");
             hs_iso_in_desc.wMaxPacketSize = 5120;
@@ -538,7 +541,7 @@ static void *(*iso_in_thread)(void *);
  * isochronous streams avoid packet data dropout.
  */
 
-static unsigned aio_in = 0;
+static unsigned aio_in = 2;
 static unsigned aio_out = 0;
 
 /* urgh, this is messy ... should couple it to the io_context  */
@@ -600,24 +603,21 @@ fail:
         errno = -res;
     else if (res2 < 0)
         errno = -res2;
-    fprintf(stderr, "%s %p fail %ld/%ld, %d (%s)\n", __FUNCTION__, iocb, res, iocb->u.c.nbytes,
-            errno, strerror(errno));
+    // fprintf(stderr, "%s %p fail %ld/%ld, %d (%s)\n", __FUNCTION__, iocb, res, iocb->u.c.nbytes,
+    //         errno, strerror(errno));
     goto resubmit;
 clean:
     aio_in_pending--;
     return;
 }
 
-#define BUFFER_COUNT 2
-
-static void *aio_in_thread(void *param) {
+static void *aio_in_thread(void *param)
+{
     char *name = (char *)param;
     int status;
     io_context_t ctx = 0;
-    struct iocb *queue, *iocb[BUFFER_COUNT];
-    char *buf[BUFFER_COUNT];
+    struct iocb *queue, *iocb;
     unsigned i;
-    int current_buffer = 0;
 
     status = iso_in_open(name);
     if (status < 0)
@@ -625,46 +625,48 @@ static void *aio_in_thread(void *param) {
     iso_in_fd = status;
     pthread_cleanup_push(close_fd, &iso_in_fd);
 
-    if (aio_in == 0) {
-        aio_in = 1;
-    }
-
     /* initialize i/o queue */
     status = io_setup(aio_in, &ctx);
-    if (status < 0) {
+    if (status < 0)
+    {
         perror("aio_in_thread, io_setup");
         return 0;
     }
     pthread_cleanup_push(queue_release, &ctx);
 
-    queue = alloca(aio_in * sizeof(struct iocb));
-
-    /* allocate buffers */
-    for (i = 0; i < BUFFER_COUNT; i++) {
-        buf[i] = malloc(iosize);
-        if (!buf[i]) {
-            fprintf(stderr, "%s can't get buffer[%d]\n", __FUNCTION__, i);
-            return 0;
-        }
-    }
+    if (aio_in == 0)
+        aio_in = 1;
+    queue = alloca(aio_in * sizeof *iocb);
 
     /* populate and (re)run the queue */
-    for (i = 0; i < aio_in; i++) {
-        current_buffer = i % BUFFER_COUNT;
-        io_prep_pwrite(&queue[i], iso_in_fd, buf[current_buffer],
-                       fill_in_buf(buf[current_buffer], iosize), 0);
-        io_set_callback(&queue[i], in_complete);
-        queue[i].key = USB_DIR_IN;
+    for (i = 0, iocb = queue; i < aio_in; i++, iocb++)
+    {
+        char *buf = malloc(iosize);
 
-        struct iocb *iocb_list[] = {&queue[i]};
-        status = io_submit(ctx, 1, iocb_list);
-        if (status < 0) {
+        if (!buf)
+        {
+            fprintf(stderr, "%s can't get buffer[%d]\n",
+                    __FUNCTION__, i);
+            return 0;
+        }
+
+        /* host receives the data we're writing */
+        io_prep_pwrite(iocb, iso_in_fd,
+                       buf, fill_in_buf(buf, iosize),
+                       0);
+        io_set_callback(iocb, in_complete);
+        iocb->key = USB_DIR_IN;
+
+        status = io_submit(ctx, 1, &iocb);
+        if (status < 0)
+        {
             perror(__FUNCTION__);
             break;
         }
         aio_in_pending++;
         if (verbose > 2)
-            fprintf(stderr, "%s submit uiocb %p\n", __FUNCTION__, &queue[i]);
+            fprintf(stderr, "%s submit uiocb %p\n",
+                    __FUNCTION__, iocb);
     }
 
     status = io_run(ctx, &aio_in_pending);
@@ -672,9 +674,6 @@ static void *aio_in_thread(void *param) {
         perror("aio_in_thread, io_run");
 
     /* clean up */
-    for (i = 0; i < BUFFER_COUNT; i++) {
-        free(buf[i]);
-    }
     fflush(stderr);
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
@@ -835,7 +834,7 @@ static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep) {
 
     memcpy(cp, &config, config.bLength);
     cp += config.bLength;
-    interface0.iInterface = STRINGID_INTERFACE1;
+    interface0.iInterface = STRINGID_INTERFACE0;
     memcpy(cp, &interface0, interface0.bLength);
     cp += interface0.bLength;
 
@@ -845,28 +844,23 @@ static char *build_config(char *cp, const struct usb_endpoint_descriptor **ep) {
     }
 
     // next intf
-    interface0.bInterfaceNumber = 1;
-    interface0.bNumEndpoints = 0;
-    memcpy(cp, &interface0, interface0.bLength);
-    cp += interface0.bLength;
+    interface1.bAlternateSetting = 0;
+    interface1.bNumEndpoints = 0;
+    interface1.iInterface = STRINGID_INTERFACE1;
+    memcpy(cp, &interface1, interface1.bLength);
+    cp += interface1.bLength;
 
-    interface0.bInterfaceNumber = 1;
-    interface0.bNumEndpoints = 1;
-    interface0.bAlternateSetting = 1;
-    memcpy(cp, &interface0, interface0.bLength);
-    cp += interface0.bLength;
+    interface1.bNumEndpoints = 1;
+    interface1.bAlternateSetting = 1;
+    memcpy(cp, &interface1, interface1.bLength);
+    cp += interface1.bLength;
 
     j = i;
-    for (i = 0; i < interface0.bNumEndpoints; i++) {
+    for (i = 0; i < interface1.bNumEndpoints; i++) {
         memcpy(cp, ep[j], USB_DT_ENDPOINT_SIZE);
         cp += USB_DT_ENDPOINT_SIZE;
         j++;
     }
-
-    interface0.bInterfaceNumber = 0;
-    interface0.bNumEndpoints = 2;
-    interface0.bAlternateSetting = 0;
-    interface0.iInterface = STRINGID_INTERFACE0;
 
     c->wTotalLength = __cpu_to_le16(cp - (char *)c);
     return cp;
@@ -1005,20 +999,27 @@ static void handle_control(int fd, struct usb_ctrlrequest *setup) {
             goto stall;
         }
         fprintf(stderr, "SET INTERFACE i:%d, v:%d\n", setup->wIndex, value);
-        if (value == 0) {
-            fprintf(stderr, "Configuring for alternate setting 0\n");
-            stop_io(1);
-        } else if (value == 1) {
-            fprintf(stderr, "Configuring for default alternate setting 1\n");
-            start_io(1);
-        } else {
+        if (value > 1)
+        {
             fprintf(stderr, "Unsupported alternate setting: %d\n", value);
             goto stall;
         }
+
         status = 0;
         status = read(fd, &status, 0);
         if (status) {
             perror("ack SET_INTERFACE");
+        }
+
+        if (value == 0) {
+            fprintf(stderr, "Configuring for alternate setting 0\n");
+            stop_io(1);
+        } else if (value == 1) {
+            fprintf(stderr, "Configuring for alternate setting 1\n");
+            start_io(1);
+        } else {
+            fprintf(stderr, "Unsupported alternate setting: %d\n", value);
+            goto stall;
         }
         return;
     case USB_REQ_CLEAR_FEATURE:
