@@ -6,6 +6,6 @@ project(
     LANGUAGES C
 )
 
-add_executable(hvperf usb.c usbstring.c)
+add_executable(hvperf hvperf.c usbstring.c)
 add_compile_definitions(AIO)
 target_link_libraries(hvperf pthread aio)
