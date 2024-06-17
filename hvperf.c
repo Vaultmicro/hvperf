@@ -296,7 +296,32 @@ static int autoconfig() {
         EP_ISO_IN_NAME = "ep3in";
 
         /* Atmel AT91 processors, full speed only */
-    } else {
+	
+    } else if (stat(DEVNAME = "dwc_otg_pcd", &statb) == 0) {
+        HIGHSPEED = 1;
+        // device_desc.bcdDevice = __constant_cpu_to_le16(0x0107),
+        device_desc.bcdDevice = __constant_cpu_to_le16(0x0103);
+
+        fs_bulk_in_desc.bEndpointAddress = hs_bulk_int_desc.bEndpointAddress = USB_DIR_IN | 1;
+        EP_IN_NAME = "ep1in";
+        fs_bulk_out_desc.bEndpointAddress = hs_bulk_out_desc.bEndpointAddress = USB_DIR_OUT | 2;
+        EP_OUT_NAME = "ep2out";
+
+        interface0.bNumEndpoints = 2;
+
+        fs_iso_in_desc.bEndpointAddress = hs_iso_in_desc.bEndpointAddress = USB_DIR_IN | 3;
+        fs_iso_in_desc.bmAttributes = hs_iso_in_desc.bmAttributes = USB_ENDPOINT_XFER_ISOC;
+        hs_iso_in_desc.wMaxPacketSize = 100;
+        if (hs_iso_in_desc.wMaxPacketSize > 5120) {
+            fprintf(stderr, "Iso wMaxPacketSize is 0x1400, 5120bytes\n");
+            hs_iso_in_desc.wMaxPacketSize = 5120;
+        }
+        EP_ISO_IN_NAME = "ep3in";
+
+        /* Atmel AT91 processors, full speed only */
+    }
+   
+    else {
         DEVNAME = 0;
         return -ENODEV;
     }
