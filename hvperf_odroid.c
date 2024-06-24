@@ -115,8 +115,6 @@ static struct usb_endpoint_descriptor iso_in_desc;
 
 static unsigned int verbose = 3;
 static unsigned int iosize = 100;
-static unsigned int aio_in_pending;
-static unsigned int aio_in = 2;
 static pthread_t bulk_in;
 static pthread_t iso_in;
 pthread_t ep0;
@@ -169,15 +167,13 @@ static void close_fd(void *fd_ptr) {
     /* test the FIFO ioctls (non-ep0 code paths) */
     if (pthread_self() != ep0) {
         status = ioctl(fd, GADGETFS_FIFO_STATUS);
-        fprintf(stderr, "!!!!!!!\n");
-        fprintf(stderr, "status : %d\n", status);
 
         if (status < 0) {
             /* ENODEV reported after disconnect */
-            if (errno != ENODEV && errno != -EOPNOTSUPP){
-                fprintf(stderr, "@@@@@@@@\n");
+            if (errno != ENODEV && errno != -EOPNOTSUPP) {
                 perror("get fifo status");
             }
+
         } else {
             fprintf(stderr, "fd %d, unclaimed = %d\n", fd, status);
             if (status) {
@@ -192,6 +188,9 @@ static void close_fd(void *fd_ptr) {
         perror("close");
 }
 
+static unsigned int aio_in_pending;
+static unsigned int aio_in = 2;
+
 static void queue_release(void *ctx_ptr) { io_destroy(*(io_context_t *)ctx_ptr); }
 
 static int io_run(io_context_t ctx, volatile unsigned *pending) {
@@ -199,7 +198,7 @@ static int io_run(io_context_t ctx, volatile unsigned *pending) {
     struct io_event e[5];
 
     /* process iocbs so long as they reissue */
-    while (*pending) {
+    while (pending) {
         unsigned i;
         struct iocb *iocb;
         io_callback_t io_complete;
@@ -219,7 +218,6 @@ static int io_run(io_context_t ctx, volatile unsigned *pending) {
 
     return ret;
 }
-
 
 static unsigned long fill_in_buf(void *buf, unsigned long nbytes) {
 #ifdef DO_PIPE
@@ -332,10 +330,17 @@ static void *aio_in_thread(void *param) {
     unsigned i;
 
     status = iso_in_open(name);
-    if (status < 0)
+    if (status < 0) {
+        fprintf(stderr, "iso_in_open failed: %s\n", strerror(-status));
         return 0;
+    }
+
     iso_in_fd = status;
     pthread_cleanup_push(close_fd, &iso_in_fd);
+
+    if (aio_in == 0) {
+        aio_in = 1;
+    }
 
     /* initialize i/o queue */
     status = io_setup(aio_in, &ctx);
@@ -344,9 +349,6 @@ static void *aio_in_thread(void *param) {
         return 0;
     }
     pthread_cleanup_push(queue_release, &ctx);
-
-    if (aio_in == 0)
-        aio_in = 1;
 
     queue = malloc(aio_in * sizeof(*iocb));
     if (!queue) {
@@ -368,15 +370,12 @@ static void *aio_in_thread(void *param) {
         io_set_callback(iocb, in_complete);
         iocb->key = USB_DIR_IN;
 
-        fprintf(stderr, "io_submit!!!\n");
         status = io_submit(ctx, 1, &iocb);
         if (status < 0) {
             perror(__FUNCTION__);
             break;
         }
-        fprintf(stderr, "io_submited @@@\n");
         aio_in_pending++;
-        fprintf(stderr, "aio_in_pending : %d\n", aio_in_pending);
         if (verbose > 2)
             fprintf(stderr, "%s submit uiocb %p\n", __FUNCTION__, iocb);
     }
@@ -386,7 +385,7 @@ static void *aio_in_thread(void *param) {
         perror("aio_in_thread, io_run");
 
     /* clean up */
-    free(queue); // 추가된 메모리 해제
+    free(queue);
     fflush(stderr);
     pthread_cleanup_pop(1);
     pthread_cleanup_pop(1);
@@ -415,14 +414,14 @@ static void start_io() {
         fprintf(stderr, "%s thread started...\n", EP_BULK_IN_NAME);
     }
 
-    if (pthread_create(&iso_in, NULL, iso_in_thread, (void *)EP_ISO_IN_NAME) != 0) {
-        perror("can't create iso_in thread");
-        pthread_cancel(bulk_in);
-        bulk_in = ep0;
-        goto cleanup;
-    } else {
-        fprintf(stderr, "%s thread started...\n", EP_ISO_IN_NAME);
-    }
+    // if (pthread_create(&iso_in, NULL, iso_in_thread, (void *)EP_ISO_IN_NAME) != 0) {
+    //     perror("can't create iso_in thread");
+    //     pthread_cancel(bulk_in);
+    //     bulk_in = ep0;
+    //     goto cleanup;
+    // } else {
+    //     fprintf(stderr, "%s thread started...\n", EP_ISO_IN_NAME);
+    // }
 
     /* give the other threads a chance to run before we report
      * success to the host.
@@ -453,13 +452,13 @@ static void stop_io() {
         bulk_in = ep0;
     }
 
-    if (!pthread_equal(iso_in, ep0)) {
-        pthread_cancel(iso_in);
-        fprintf(stderr, "%s thread stopped...\n", EP_ISO_IN_NAME);
-        if (pthread_join(iso_in, NULL) != 0)
-            perror("can't join iso_in thread");
-        iso_in = ep0;
-    }
+    // if (!pthread_equal(iso_in, ep0)) {
+    //     pthread_cancel(iso_in);
+    //     fprintf(stderr, "%s thread stopped...\n", EP_ISO_IN_NAME);
+    //     if (pthread_join(iso_in, NULL) != 0)
+    //         perror("can't join iso_in thread");
+    //     iso_in = ep0;
+    // }
 
     pthread_mutex_unlock(&io_mutex);
 }
@@ -499,7 +498,7 @@ static void handle_setup_request(int fd, struct usb_ctrlrequest *setup) {
         }
         switch (setup->wValue) {
         case CONFIG_VALUE:
-            printf("Set config_fs value\n");
+            printf("Set config_hs value\n");
             start_io();
             break;
         case 0:
@@ -610,7 +609,7 @@ int main() {
     uint8_t *cp;
 
     bulk_in_thread = simple_in_thread;
-    iso_in_thread = aio_in_thread;
+    // iso_in_thread = aio_in_thread;
 
     fd = open(USB_DEV, O_RDWR | O_SYNC);
 
